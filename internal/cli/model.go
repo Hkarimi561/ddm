@@ -25,6 +25,7 @@ func newModelCmd(g *globals) *cobra.Command {
 		Short: "Download Docker Model Runner models with resumable transfers",
 	}
 	var noLoad bool
+	var startAt string
 	pullCmd := &cobra.Command{
 		Use:   "pull MODEL",
 		Short: "Download a model and load it into Docker Model Runner",
@@ -44,10 +45,14 @@ mirror: "ddm mirror add hf.co https://hf-mirror.com") and packaged with
 			if err != nil {
 				return err
 			}
+			if err := waitUntil(cmd.Context(), startAt); err != nil {
+				return err
+			}
 			return mp.Pull(cmd.Context(), args[0])
 		},
 	}
 	pullCmd.Flags().BoolVar(&noLoad, "no-load", false, "only download into the ddm cache; don't load into Docker Model Runner")
+	pullCmd.Flags().StringVar(&startAt, "start-at", "", "wait until this time before downloading, e.g. 02:00")
 	cmd.AddCommand(pullCmd)
 	return cmd
 }

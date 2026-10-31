@@ -340,6 +340,12 @@ func (j *job) monitor(stop <-chan struct{}) {
 			if !speedCheck {
 				continue
 			}
+			if limit := j.opts.Limiter.Rate(); j.opts.Gate.Paused() || (limit > 0 && limit < j.opts.MinSpeed) {
+				// Paused, or capped below min_speed by the user: slowness
+				// says nothing about the mirror.
+				windowStart, windowBytes = now, j.received.Load()
+				continue
+			}
 			if gen := j.srcs.generation(); gen != windowGen {
 				// A new source gets a full window before it is judged.
 				windowStart, windowBytes, windowGen = now, j.received.Load(), gen
@@ -367,6 +373,9 @@ func (j *job) monitor(stop <-chan struct{}) {
 func (j *job) fetchChunk(ctx context.Context, c *chunk) error {
 	failures, authFailures := 0, 0
 	for !c.complete() {
+		if err := j.opts.Gate.Wait(ctx); err != nil {
+			return err
+		}
 		progressed, gen, err := j.fetchOnce(ctx, c)
 		if progressed {
 			j.srcs.progressed(gen)
@@ -377,8 +386,8 @@ func (j *job) fetchChunk(ctx context.Context, c *chunk) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if errors.Is(err, errSwitched) {
-			continue
+		if errors.Is(err, errSwitched) || errors.Is(err, errPaused) {
+			continue // a pause is waited out at the top of the loop
 		}
 		if errors.Is(err, errRangeUnsupported) {
 			return err
@@ -434,6 +443,9 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, gen int
 	defer cancel()
 	stopOnSwitch := context.AfterFunc(genCtx, cancel)
 	defer stopOnSwitch()
+	pauseCtx := j.opts.Gate.context()
+	stopOnPause := context.AfterFunc(pauseCtx, cancel)
+	defer stopOnPause()
 	var stalled atomic.Bool
 	watchdog := time.AfterFunc(j.opts.StallTimeout, func() {
 		stalled.Store(true)
@@ -442,6 +454,8 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, gen int
 	defer watchdog.Stop()
 	transient := func(err error) error {
 		switch {
+		case pauseCtx.Err() != nil:
+			return errPaused
 		case genCtx.Err() != nil:
 			return errSwitched
 		case stalled.Load():
@@ -495,7 +509,8 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, gen int
 
 	buf := make([]byte, readBufferSize)
 	for off := start; off < end; {
-		n, rerr := resp.Body.Read(buf[:min(int64(len(buf)), end-off)])
+		readSize := j.opts.Limiter.ReadSize(len(buf))
+		n, rerr := resp.Body.Read(buf[:min(int64(readSize), end-off)])
 		if n > 0 {
 			watchdog.Reset(j.opts.StallTimeout)
 			if _, werr := j.file.WriteAt(buf[:n], off); werr != nil {
@@ -506,6 +521,10 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, gen int
 			progressed = true
 			j.received.Add(int64(n))
 			j.prog.Add(j.blob.Digest, int64(n))
+			if err := j.opts.Limiter.Wait(reqCtx, n); err != nil {
+				return progressed, gen, transient(err)
+			}
+			watchdog.Reset(j.opts.StallTimeout) // time spent throttled isn't a stall
 		}
 		if rerr != nil {
 			if off >= end {

@@ -8,9 +8,10 @@ then loads the finished image into your local Docker under its original name.
 Ctrl+C, a dropped Wi-Fi link, a crash or a reboot: run the same command again
 and it continues from the exact byte where it stopped.
 
-> **Status: Milestone 3** (download engine, `ddm pull`, import into Docker,
-> mirrors, config file, proxies, `ddm docker …` pass-through, `ddm doctor`).
-> Docker Model Runner support comes in a later milestone.
+> **Status: all five milestones implemented, in testing**: download engine,
+> `ddm pull`, mirrors, config, proxies, `ddm docker …` pass-through,
+> `ddm doctor`, Docker Model Runner models, pause/resume/status, bandwidth
+> limits and cache cleanup.
 
 ## Install
 
@@ -62,12 +63,66 @@ ddm pull --no-load big/image:tag       # download only, e.g. while Docker is sto
 | `--stall-timeout` | 30s | reconnect when no data arrives for this long |
 | `--min-speed` | 32KiB | switch to the next mirror below this speed (0 = never) |
 | `--no-load` | off | keep the image in the ddm cache only |
+| `--start-at` | now | wait until a time (`02:00`) before downloading |
+| `--limit-rate` | `bandwidth_limit` | cap the total download speed, e.g. `2MiB` |
 | `--cache-dir` | see below | where blobs and partial downloads live |
 | `--config` | see below | config file to use |
 | `--verbose` | off | debug logs (also switches to line-based progress) |
 
 Credentials come from `~/.docker/config.json`, including credential helpers,
 so `docker login` works as usual, for mirrors too.
+
+## Docker models
+
+```sh
+ddm model pull ai/smollm2
+ddm model pull hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M
+ddm docker model run ai/gemma3 "Hello"      # pass-through: fetch if missing, then run
+```
+
+- **Registry models** (Docker Hub `ai/…` and any OCI registry) download
+  through the same engine and mirrors as images. They load into Docker Model
+  Runner with their original manifest, so `docker model list` shows the same
+  ID as after `docker model pull`.
+- **Hugging Face models** (`hf.co/…`) download file by file, resume after
+  any interruption, and are checked against the Hub's sha256. Model Runner's
+  own Hugging Face download does neither.
+  - The quantization works like Model Runner's: Q4_K_M unless you name one,
+    with every shard of split files.
+  - `docker model package` builds the model, so it gets the name
+    `docker model run` looks for.
+  - Mirrors: `ddm mirror add hf.co https://hf-mirror.com`. `HF_ENDPOINT`
+    and, for gated repos, `HF_TOKEN` are honored.
+- **Before downloading**, ddm checks that the `docker model` plugin is
+  installed and that the runner is running. If the runner is off, it offers
+  to start it, and only after you say yes. ddm warns, without blocking, when
+  the weights look too big for your RAM or GPU memory.
+
+Design notes: [docs/model-runner-research.md](docs/model-runner-research.md).
+
+## Stay in control
+
+```sh
+ddm status                 # running downloads, speed, ETA, mirror per blob; unfinished ones in the cache
+ddm pause                  # pause every running download (or: ddm pause PID)
+ddm resume
+ddm limit 1MiB             # change the speed limit of running downloads (0 = none)
+ddm pull --limit-rate 2MiB postgres:16
+ddm config set bandwidth_limit 2MiB      # default limit for every download
+ddm pull --start-at 02:00 big/image:tag  # start at night
+
+ddm cache ls               # cached images and models, sizes, last use
+ddm cache gc               # delete blobs nothing needs and stale partial downloads
+ddm cache gc --older-than 30d            # also forget things unused for 30 days
+ddm cache rm docker.io/library/nginx:latest
+```
+
+- **Pausing** closes connections and keeps every byte. Ctrl+C works too:
+  run the same command again and it resumes.
+- **The cache** keeps downloads after they're loaded into Docker, so shared
+  layers come down once. `cache gc` never touches a download that is still
+  running.
+- **Shell completion:** `ddm completion bash|zsh|fish|powershell`.
 
 ## Docker pass-through
 
@@ -175,6 +230,7 @@ parallel: 3
 retries: 0              # 0 = retry forever
 stall_timeout: 30s
 min_speed: 64KiB        # 0 = never switch mirrors for speed
+bandwidth_limit: 0      # e.g. 2MiB; 0 = unlimited
 proxy: socks5://127.0.0.1:1080
 no_proxy: localhost,.corp.example
 cache_dir: D:\ddm-cache

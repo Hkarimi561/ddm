@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/Hkarimi561/ddm/internal/cache"
 	"github.com/Hkarimi561/ddm/internal/docker"
 	"github.com/Hkarimi561/ddm/internal/engine"
 	"github.com/Hkarimi561/ddm/internal/hf"
@@ -167,6 +168,7 @@ func (p *Puller) pullHF(ctx context.Context, ref modelref.Ref) error {
 	if err != nil {
 		return err
 	}
+	p.rememberHF(ref, plan, digests)
 	if p.Runner == nil {
 		fmt.Fprintf(p.Out, "Downloaded %s into the ddm cache (not loaded into Docker Model Runner).\n", ref)
 		return nil
@@ -234,6 +236,18 @@ func (p *Puller) downloadHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan
 		return nil, ctx.Err()
 	}
 	return digests, err
+}
+
+// rememberHF records the model's files in the cache index for `ddm cache`.
+func (p *Puller) rememberHF(ref modelref.Ref, plan *hf.Plan, digests map[string]string) {
+	r := cache.Ref{Name: ref.String(), Kind: "model"}
+	for _, f := range plan.Files() {
+		r.Blobs = append(r.Blobs, digests[f.Path])
+		r.Size += f.Size
+	}
+	if err := p.Images.Cache.Remember(r); err != nil && p.Log != nil {
+		p.Log.Warn("could not update the cache index", "err", err)
+	}
 }
 
 // packageHF builds the model with `docker model package` from the cached

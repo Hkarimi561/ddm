@@ -147,6 +147,7 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 		}
 	}
 	if len(missing) == 0 {
+		p.remember(img, all)
 		return nil
 	}
 	if err := p.CheckSpace(total); err != nil {
@@ -185,7 +186,25 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if err == nil {
+		p.remember(img, all)
+	}
 	return err
+}
+
+// remember records img in the cache index for `ddm cache` and gc.
+func (p *Puller) remember(img *registry.Image, blobs []engine.Blob) {
+	ref := cache.Ref{Name: docker.QualifiedName(img.Ref), Kind: "image", Blobs: []string{img.ManifestDigest}, Size: int64(len(img.RawManifest))}
+	if registry.IsModelConfig(img.Config.MediaType) {
+		ref.Kind = "model"
+	}
+	for _, b := range blobs {
+		ref.Blobs = append(ref.Blobs, b.Digest)
+		ref.Size += b.Size
+	}
+	if err := p.Cache.Remember(ref); err != nil && p.Log != nil {
+		p.Log.Warn("could not update the cache index", "err", err)
+	}
 }
 
 // NoSpaceError means the cache's disk can't hold a download.

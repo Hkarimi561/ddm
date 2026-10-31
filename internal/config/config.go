@@ -26,6 +26,7 @@ type Config struct {
 	Retries      int // 0 = retry forever
 	StallTimeout time.Duration
 	MinSpeed     int64 // bytes/s; a mirror slower than this is switched away from (0 = never)
+	RateLimit    int64 // bytes/s for all downloads of a process together (0 = unlimited)
 	Proxy        string
 	NoProxy      string
 	CacheDir     string
@@ -82,6 +83,16 @@ var Keys = []Key{
 				return err
 			}
 			c.MinSpeed = n
+			return nil
+		}},
+	{"bandwidth_limit", "cap the total download speed, e.g. 2MiB (0 = unlimited)",
+		func(c *Config) string { return FormatSize(c.RateLimit) },
+		func(c *Config, v string) error {
+			n, err := ParseSize(v)
+			if err != nil {
+				return err
+			}
+			c.RateLimit = n
 			return nil
 		}},
 	{"proxy", "proxy for all registry traffic: http://, https:// or socks5:// (default: HTTP(S)_PROXY)",

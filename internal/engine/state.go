@@ -64,6 +64,19 @@ func (s *State) validate(digest string, size int64) error {
 	return nil
 }
 
+// ReadProgress reports how much of a partial download is done, from its
+// state file.
+func ReadProgress(statePath string) (done, size int64, digest string, err error) {
+	st, err := loadState(statePath)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	for _, c := range st.Chunks {
+		done += c.Done
+	}
+	return done, st.Size, st.Digest, nil
+}
+
 // saveState writes the state through a temporary file and a rename, so a
 // crash leaves either the old or the new state, never a torn one.
 func saveState(path string, s *State) error {

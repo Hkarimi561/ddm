@@ -238,6 +238,7 @@
       <a class="hide-sm" href="#mirrors">Mirrors</a>
       <a class="hide-sm" href="#passthrough">Pass-through</a>
       <a class="hide-sm" href="#models">Models</a>
+      <a class="hide-sm" href="#control">Control</a>
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#usage">Usage</a>
       <a id="gh-link" href="#">GitHub</a>
@@ -511,6 +512,73 @@ Hi there, nice to meet you!
       </div>
     </section>
 
+    <section id="control">
+      <h2>Stay in control</h2>
+      <p class="sub">Big downloads take a while. Check on them from another terminal, pause them when you need the bandwidth, cap their speed, start them at night, and reclaim the disk space afterwards.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
+          <h3>Status, pause, resume</h3>
+          <p><code>ddm status</code> shows every running download with speed, ETA and the mirror each file comes from. <code>ddm pause</code> stops them within a second and keeps every byte; <code>ddm resume</code> picks up exactly there.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13 16 9"/><path d="M4 18a9 9 0 1 1 16 0"/><circle cx="12" cy="13" r="1.2"/></svg></div>
+          <h3>Speed limits &amp; scheduling</h3>
+          <p>Cap all downloads with <code>--limit-rate 2MiB</code> or a default in the config, and change it on the fly with <code>ddm limit</code>. <code>--start-at 02:00</code> waits for off-peak hours.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg></div>
+          <h3>A tidy cache</h3>
+          <p><code>ddm cache ls</code> lists what's cached and when it was last used. <code>ddm cache gc</code> deletes what nothing needs and stale partial downloads, but never touches a download in progress.</p>
+        </div>
+      </div>
+
+      <div class="term" style="margin-top: 20px">
+        <div class="term-bar"><i></i><i></i><i></i>
+          <div class="term-tabs" role="tablist" aria-label="Control examples">
+            <button role="tab" aria-selected="true" data-pane="ct-status">status</button>
+            <button role="tab" aria-selected="false" data-pane="ct-pause">pause &amp; limit</button>
+            <button role="tab" aria-selected="false" data-pane="ct-cache">cache</button>
+          </div>
+        </div>
+<pre class="wrap pane" id="ct-status"><span class="t-g">~</span> <span class="t-dim">$</span> ddm status
+PID 48213  ddm model pull hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+  downloading: 1.2 GiB / 1.9 GiB (63%), 2.4 MiB/s, about 4m52s left (limited to 3.0 MiB/s)
+    Llama-3.2-3B-Instruct-Q4_K_M.gguf  1.2 GiB / 1.9 GiB  downloading  via https://hf-mirror.com
+PID 48377  ddm docker compose up -d
+  <span class="t-a">PAUSED</span>: 151.2 MiB / 189.2 MiB (80%)
+    config                             7.4 KiB / 7.4 KiB      done
+    layer 1/9 2d429b9e73a6             28.2 MiB / 28.2 MiB    done
+    layer 2/9 a8ff36ebd4ab             84.1 MiB / 104.9 MiB   downloading
+
+1 unfinished download(s) in the cache (12.0 MiB of 40.3 MiB); they resume automatically the next time the image or model is pulled.
+<span class="t-g">~</span> <span class="t-dim">$</span> </pre>
+<pre class="wrap pane" id="ct-pause" hidden><span class="t-g">~</span> <span class="t-dim">$</span> ddm pause
+Paused PID 48213, 48377. Resume with `ddm resume`.
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm resume 48213
+Resumed PID 48213.
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm limit 1MiB
+PID 48213, 48377: 1.0 MiB/s.
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm config set bandwidth_limit 2MiB          <span class="t-dim"># default for every download</span>
+bandwidth_limit = 2MiB
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm pull --start-at 02:00 pytorch/pytorch:latest
+<span class="t-ddm">Waiting until Sun 02:00 to start (5h12m0s from now). Ctrl+C to cancel.</span>
+<span class="t-dim">  ...</span></pre>
+<pre class="wrap pane" id="ct-cache" hidden><span class="t-g">~</span> <span class="t-dim">$</span> ddm cache ls
+<span class="t-bold">NAME                                                        KIND   SIZE       LAST USED</span>
+huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M  model  1.9 GiB    2 hours ago
+docker.io/library/postgres:16                               image  151.2 MiB  3 hours ago
+docker.io/ai/smollm2:latest                                 model  256.4 MiB  2 days ago
+docker.io/library/node:20                                   image  402.7 MiB  41 days ago
+
+2.7 GiB in 31 blobs (64.0 MiB not used by anything listed).
+Cache: /home/sam/.cache/ddm
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm cache gc --older-than 30d
+Freed 466.7 MiB: 12 blob(s), 0 unfinished download(s), forgetting docker.io/library/node:20.
+<span class="t-g">~</span> <span class="t-dim">$</span> </pre>
+      </div>
+    </section>
+
     <section id="how">
       <h2>How it works</h2>
       <p class="sub">ddm skips Docker's downloader and only hands Docker the finished result. No network is involved in that last step.</p>
@@ -549,6 +617,11 @@ Hi there, nice to meet you!
             <tr><td><code>ddm model pull hf.co/org/repo:Q4_K_M</code></td><td>Download a Hugging Face GGUF model, verified file by file</td></tr>
             <tr><td><code>ddm docker model run ai/gemma3</code></td><td>Check the runner, fetch the model if missing, then run it</td></tr>
             <tr><td><code>ddm mirror add hf.co https://hf-mirror.com</code></td><td>Fetch Hugging Face models through a mirror</td></tr>
+            <tr><td><code>ddm status</code></td><td>Show running downloads, speed, ETA and unfinished downloads</td></tr>
+            <tr><td><code>ddm pause</code> / <code>ddm resume</code></td><td>Pause and resume running downloads without losing data</td></tr>
+            <tr><td><code>ddm limit 1MiB</code></td><td>Change the speed limit of running downloads</td></tr>
+            <tr><td><code>ddm pull --start-at 02:00 IMAGE</code></td><td>Start a download at a given time</td></tr>
+            <tr><td><code>ddm cache gc --older-than 30d</code></td><td>Free disk space taken by old downloads</td></tr>
           </tbody>
         </table>
       </div>
@@ -556,13 +629,13 @@ Hi there, nice to meet you!
 
     <section id="roadmap">
       <h2>Roadmap</h2>
-      <p class="sub">ddm is being built in milestones.</p>
+      <p class="sub">All five milestones are built and now being tested on real Docker installs.</p>
       <div class="roadmap">
         <div class="done"><b>Resumable engine</b><code>ddm pull</code> and the Docker import</div>
         <div class="done"><b>Mirrors &amp; config</b>Mirror fallback, <code>ddm mirror test</code>, proxies, config file <em>(in testing)</em></div>
         <div class="done"><b>Pass-through &amp; doctor</b><code>ddm docker …</code>, <code>ddm doctor</code>, <code>ddm shell-init</code> <em>(in testing)</em></div>
         <div class="done"><b>Docker models</b><code>ddm model pull</code>, Hugging Face, Model Runner checks <em>(in testing)</em></div>
-        <div><b>Polish</b>Pause/resume, bandwidth limits, cache cleanup</div>
+        <div class="done"><b>Polish</b>Status, pause/resume, bandwidth limits, scheduling, cache cleanup <em>(in testing)</em></div>
       </div>
     </section>
   </main>

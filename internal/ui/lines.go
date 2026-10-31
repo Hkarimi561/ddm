@@ -18,8 +18,9 @@ type lines struct {
 	mu    sync.Mutex
 	total int64
 	sum   int64
-	cur   map[string]int64
-	names map[string]string
+	cur     map[string]int64
+	names   map[string]string
+	sources map[string]string
 
 	stop, done chan struct{}
 }
@@ -27,7 +28,7 @@ type lines struct {
 func newLines(w io.Writer, total int64) *lines {
 	l := &lines{
 		w: w, total: total,
-		cur: map[string]int64{}, names: map[string]string{},
+		cur: map[string]int64{}, names: map[string]string{}, sources: map[string]string{},
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	go l.tick()
@@ -90,6 +91,17 @@ func (l *lines) Retry(digest string, attempt int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	fmt.Fprintf(l.w, "!   %s: attempt %d failed, retrying: %v\n", l.names[digest], attempt, err)
+}
+
+// Source reports mirror switches; the initial source is not worth a line.
+func (l *lines) Source(digest, name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	prev, seen := l.sources[digest]
+	l.sources[digest] = name
+	if seen && prev != name {
+		fmt.Fprintf(l.w, "~   %s: switching to %s\n", l.names[digest], hostOf(name))
+	}
 }
 
 func (l *lines) Done(digest string) {

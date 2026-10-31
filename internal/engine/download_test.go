@@ -58,7 +58,7 @@ func (f *fixture) source() Source {
 }
 
 func (f *fixture) download(ctx context.Context, opts Options) error {
-	return (&Downloader{Cache: f.cache, Options: opts}).Download(ctx, f.blob, f.source())
+	return (&Downloader{Cache: f.cache, Options: opts}).Download(ctx, f.blob, []Source{f.source()})
 }
 
 func (f *fixture) assertCached(t *testing.T) {
@@ -172,7 +172,7 @@ func TestCorruptedChunkIsRedownloadedAlone(t *testing.T) {
 		}
 	}
 
-	if err := d.Download(context.Background(), f.blob, f.source()); err != nil {
+	if err := d.Download(context.Background(), f.blob, []Source{f.source()}); err != nil {
 		t.Fatal(err)
 	}
 	f.assertCached(t)

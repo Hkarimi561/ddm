@@ -10,12 +10,14 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Hkarimi561/ddm/internal/cache"
+	"github.com/Hkarimi561/ddm/internal/diskspace"
 	"github.com/Hkarimi561/ddm/internal/docker"
 	"github.com/Hkarimi561/ddm/internal/engine"
 	"github.com/Hkarimi561/ddm/internal/registry"
@@ -63,6 +65,9 @@ func (p *Puller) Pull(ctx context.Context, refStr string, opts Options) error {
 	img, err := p.Registry.ResolveImage(ctx, ref, platform)
 	if err != nil {
 		return err
+	}
+	if img.Source != p.Registry.Endpoints(ref.Context().Registry)[0].Name {
+		fmt.Fprintf(p.Out, "Manifest fetched from %s\n", img.Source)
 	}
 	if load {
 		if done, err := p.alreadyInDocker(ctx, img); err != nil || done {
@@ -144,12 +149,22 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 	if len(missing) == 0 {
 		return nil
 	}
+	if err := p.checkSpace(total); err != nil {
+		return err
+	}
 
-	ep, err := p.Registry.BlobEndpoint(ctx, img.Ref.Context())
+	eps, err := p.Registry.BlobEndpoints(ctx, img.Ref.Context())
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(p.Out, "Downloading %d of %d blobs (%s)\n", len(missing), len(all), ui.HumanBytes(total))
+	if len(eps) > 1 {
+		names := make([]string, len(eps))
+		for i, e := range eps {
+			names[i] = e.Name
+		}
+		fmt.Fprintf(p.Out, "Sources, in order: %s\n", strings.Join(names, ", "))
+	}
 
 	var rep Reporter = nopReporter{}
 	if p.NewReporter != nil {
@@ -163,7 +178,7 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(parallel)
 	for _, b := range missing {
-		g.Go(func() error { return dl.Download(gctx, b, ep.Source(b.Digest)) })
+		g.Go(func() error { return dl.Download(gctx, b, registry.Sources(eps, b.Digest)) })
 	}
 	err = g.Wait()
 	rep.Close()
@@ -171,6 +186,38 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 		return ctx.Err()
 	}
 	return err
+}
+
+// NoSpaceError means the cache's disk can't hold a download.
+type NoSpaceError struct {
+	Path       string
+	Need, Free uint64
+}
+
+func (e *NoSpaceError) Error() string {
+	return fmt.Sprintf("not enough disk space: the download needs %s but only %s is free at %s; free up space or move the cache with `ddm config set cache_dir <dir>`",
+		ui.HumanBytes(int64(e.Need)), ui.HumanBytes(int64(e.Free)), e.Path)
+}
+
+// spaceMargin is kept free beyond the download itself.
+const spaceMargin = 256 << 20
+
+// checkSpace makes sure the cache's disk can hold another n bytes. Partial
+// downloads already have their full size reserved, but counting them again
+// errs on the safe side. If free space can't be determined, it doesn't block.
+func (p *Puller) checkSpace(n int64) error {
+	free, err := diskspace.Free(p.Cache.Root)
+	if err != nil {
+		if p.Log != nil {
+			p.Log.Debug("could not determine free disk space", "err", err)
+		}
+		return nil
+	}
+	need := uint64(n) + spaceMargin
+	if free < need {
+		return &NoSpaceError{Path: p.Cache.Root, Need: need, Free: free}
+	}
+	return nil
 }
 
 // Import loads a fully cached img into Docker.
@@ -235,6 +282,7 @@ func (nopReporter) Start(engine.Blob, int64)  {}
 func (nopReporter) Add(string, int64)        {}
 func (nopReporter) Set(string, int64)        {}
 func (nopReporter) Retry(string, int, error) {}
+func (nopReporter) Source(string, string)    {}
 func (nopReporter) Done(string)              {}
 func (nopReporter) Fail(string, error)       {}
 func (nopReporter) Close()                   {}

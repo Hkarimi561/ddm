@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -63,6 +64,9 @@ func (p *Puller) Pull(ctx context.Context, refStr string, opts Options) error {
 	img, err := p.Registry.ResolveImage(ctx, ref, platform)
 	if err != nil {
 		return err
+	}
+	if img.Source != p.Registry.Endpoints(ref.Context().Registry)[0].Name {
+		fmt.Fprintf(p.Out, "Manifest fetched from %s\n", img.Source)
 	}
 	if load {
 		if done, err := p.alreadyInDocker(ctx, img); err != nil || done {
@@ -145,11 +149,18 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 		return nil
 	}
 
-	ep, err := p.Registry.BlobEndpoint(ctx, img.Ref.Context())
+	eps, err := p.Registry.BlobEndpoints(ctx, img.Ref.Context())
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(p.Out, "Downloading %d of %d blobs (%s)\n", len(missing), len(all), ui.HumanBytes(total))
+	if len(eps) > 1 {
+		names := make([]string, len(eps))
+		for i, e := range eps {
+			names[i] = e.Name
+		}
+		fmt.Fprintf(p.Out, "Sources, in order: %s\n", strings.Join(names, ", "))
+	}
 
 	var rep Reporter = nopReporter{}
 	if p.NewReporter != nil {
@@ -163,7 +174,7 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(parallel)
 	for _, b := range missing {
-		g.Go(func() error { return dl.Download(gctx, b, ep.Source(b.Digest)) })
+		g.Go(func() error { return dl.Download(gctx, b, registry.Sources(eps, b.Digest)) })
 	}
 	err = g.Wait()
 	rep.Close()
@@ -235,6 +246,7 @@ func (nopReporter) Start(engine.Blob, int64)  {}
 func (nopReporter) Add(string, int64)        {}
 func (nopReporter) Set(string, int64)        {}
 func (nopReporter) Retry(string, int, error) {}
+func (nopReporter) Source(string, string)    {}
 func (nopReporter) Done(string)              {}
 func (nopReporter) Fail(string, error)       {}
 func (nopReporter) Close()                   {}

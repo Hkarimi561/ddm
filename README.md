@@ -8,9 +8,9 @@ then loads the finished image into your local Docker under its original name.
 Ctrl+C, a dropped Wi-Fi link, a crash or a reboot: run the same command again
 and it continues from the exact byte where it stopped.
 
-> **Status: Milestone 1** (download engine, `ddm pull`, import into Docker).
-> Mirrors, config files, `ddm doctor`, the `ddm docker …` pass-through and
-> Model Runner support come in later milestones.
+> **Status: Milestone 2** (download engine, `ddm pull`, import into Docker,
+> mirrors, config file, proxies). `ddm doctor`, the `ddm docker …`
+> pass-through and Model Runner support come in later milestones.
 
 ## Install
 
@@ -60,17 +60,82 @@ ddm pull --no-load big/image:tag       # download only, e.g. while Docker is sto
 | `-p, --parallel` | 3 | blobs downloaded at once |
 | `--retries` | 0 (forever) | consecutive failed attempts before giving up |
 | `--stall-timeout` | 30s | reconnect when no data arrives for this long |
+| `--min-speed` | 32KiB | switch to the next mirror below this speed (0 = never) |
 | `--no-load` | off | keep the image in the ddm cache only |
 | `--cache-dir` | see below | where blobs and partial downloads live |
+| `--config` | see below | config file to use |
 | `--verbose` | off | debug logs (also switches to line-based progress) |
 
 Credentials come from `~/.docker/config.json`, including credential helpers,
-so `docker login` works as usual. `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`
-are honored.
+so `docker login` works as usual, for mirrors too.
+
+## Mirrors
+
+Mirrors are set per upstream registry and tried in order, with the upstream
+itself last. ddm moves on to the next mirror when the current one keeps
+failing, doesn't have a blob, or stays below `min_speed` for 30 seconds.
+The download continues on the new mirror from where it stopped: blobs are
+identified by their digest, so bytes fetched from different mirrors fit
+together.
+
+```sh
+ddm mirror add docker.io https://docker.arvancloud.ir
+ddm mirror add docker.io https://mirror.example.com --first
+ddm mirror add ghcr.io https://harbor.example.com/ghcr-proxy   # proxy cache under a project
+ddm mirror list
+ddm mirror test docker.io            # measure latency and speed of each, suggest an order
+ddm mirror test docker.io --apply    # ...and save that order
+ddm mirror set-default docker.io https://mirror.example.com
+ddm mirror remove docker.io https://mirror.example.com
+```
+
+To put the upstream somewhere other than last, add it explicitly, for
+example `ddm mirror add docker.io https://docker.io`. ddm ships with no
+mirrors configured.
+
+## Configuration
+
+Settings are kept in a YAML file you can edit by hand. `ddm config path`
+prints where it is:
+
+- Linux: `~/.config/ddm/config.yaml` (or `$XDG_CONFIG_HOME/ddm`)
+- macOS: `~/Library/Application Support/ddm/config.yaml`
+- Windows: `%AppData%\ddm\config.yaml`
+
+`$DDM_CONFIG` or `--config` pick another file.
+
+```yaml
+connections: 8
+parallel: 3
+retries: 0              # 0 = retry forever
+stall_timeout: 30s
+min_speed: 64KiB        # 0 = never switch mirrors for speed
+proxy: socks5://127.0.0.1:1080
+no_proxy: localhost,.corp.example
+cache_dir: D:\ddm-cache
+mirrors:
+  docker.io:
+    - https://docker.arvancloud.ir
+    - https://docker.io
+  ghcr.io:
+    - https://harbor.example.com/ghcr-proxy
+```
+
+```sh
+ddm config list            # every setting, its value and what it does
+ddm config set connections 8
+ddm config set proxy socks5://127.0.0.1:1080
+ddm config unset proxy
+```
+
+Flags override the file for one run. `proxy` accepts `http://`, `https://`
+and `socks5://` URLs. Without it, `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`
+are used. Editing through `ddm config` and `ddm mirror` keeps your comments.
 
 ### Cache location
 
-`$DDM_CACHE_DIR` if it is set, otherwise:
+`--cache-dir`, then `$DDM_CACHE_DIR`, then `cache_dir` from the config,
+otherwise:
 
 - Linux: `~/.cache/ddm` (or `$XDG_CACHE_HOME/ddm`)
 - macOS: `~/Library/Caches/ddm`

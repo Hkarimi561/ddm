@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Manifest is a manifest served by FlakyRegistry.
@@ -34,6 +35,9 @@ type FlakyRegistry struct {
 	NoRange   bool    // ignore Range headers and always send the whole blob
 	Redirect  bool    // serve blobs through a redirect, like CDN-backed registries
 	PieceSize int     // bytes written and flushed at a time (default 16 KiB)
+
+	FailStatus int           // answer every blob request with this HTTP status (e.g. 503)
+	Delay      time.Duration // pause after each piece, to simulate a slow link
 
 	mu         sync.Mutex
 	rng        *rand.Rand
@@ -170,6 +174,10 @@ func (f *FlakyRegistry) serveBlob(w http.ResponseWriter, r *http.Request, digest
 	f.requests++
 	f.mu.Unlock()
 
+	if f.FailStatus != 0 {
+		http.Error(w, http.StatusText(f.FailStatus), f.FailStatus)
+		return
+	}
 	data, ok := f.Blobs[digest]
 	if !ok {
 		http.Error(w, `{"errors":[{"code":"BLOB_UNKNOWN"}]}`, http.StatusNotFound)
@@ -224,6 +232,13 @@ func (f *FlakyRegistry) serveBlob(w http.ResponseWriter, r *http.Request, digest
 			}
 			off += n
 			f.count(gen, digest, n)
+			if f.Delay > 0 {
+				select {
+				case <-time.After(f.Delay):
+				case <-r.Context().Done():
+					return
+				}
+			}
 		}
 		if cut >= 0 && off >= cut {
 			f.mu.Lock()

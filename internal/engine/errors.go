@@ -16,10 +16,15 @@ var (
 	errRangeUnsupported = errors.New("server does not support range requests")
 	errAgain            = errors.New("download state changed")
 	errStalled          = errors.New("connection stalled")
+	errSwitched         = errors.New("switched to another source")
 )
 
 // permanentError marks failures that retrying the same request cannot fix.
-type permanentError struct{ err error }
+// Unless local is set, another source might still succeed.
+type permanentError struct {
+	err   error
+	local bool // a problem on this machine (e.g. disk full); no source can help
+}
 
 func (e *permanentError) Error() string { return e.err.Error() }
 func (e *permanentError) Unwrap() error { return e.err }
@@ -56,10 +61,10 @@ func classifyStatus(resp *http.Response, origHost string) error {
 			// again hands out a fresh one.
 			return se
 		}
-		return &permanentError{se}
+		return &permanentError{err: se}
 	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed,
 		http.StatusGone, http.StatusRequestedRangeNotSatisfiable:
-		return &permanentError{se}
+		return &permanentError{err: se}
 	}
 	return se
 }

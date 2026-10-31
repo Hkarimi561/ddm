@@ -33,6 +33,7 @@ type blobBar struct {
 	current  int64
 	last     time.Time
 	retries  atomic.Int64
+	source   atomic.Pointer[string]
 	finished bool
 }
 
@@ -75,6 +76,12 @@ func (r *bars) Start(b engine.Blob, current int64) {
 				decor.CountersKibiByte("% .1f / % .1f"),
 				decor.Name("  "),
 				decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .1f", ewmaAge), "done"),
+				decor.Any(func(s decor.Statistics) string {
+					if src := bb.source.Load(); src != nil && !s.Completed {
+						return "  via " + *src
+					}
+					return ""
+				}),
 			),
 		)
 		r.blobs[b.Digest] = bb
@@ -121,6 +128,16 @@ func (r *bars) Retry(digest string, _ int, _ error) {
 	r.mu.Unlock()
 	if bb != nil {
 		bb.retries.Add(1)
+	}
+}
+
+func (r *bars) Source(digest, name string) {
+	r.mu.Lock()
+	bb := r.blobs[digest]
+	r.mu.Unlock()
+	if bb != nil {
+		host := hostOf(name)
+		bb.source.Store(&host)
 	}
 }
 

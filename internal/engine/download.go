@@ -41,13 +41,17 @@ type Downloader struct {
 	beforeVerify func(path string)
 }
 
-// Download fetches b from src into the cache, resuming any earlier partial
-// download of the same digest. It returns nil once the verified blob is in
-// the cache. Concurrent downloads of the same blob (in this or another
-// process) wait for each other instead of clobbering the data.
-func (d *Downloader) Download(ctx context.Context, b Blob, src Source) error {
+// Download fetches b into the cache from srcs, tried in order (see
+// sources), resuming any earlier partial download of the same digest. It
+// returns nil once the verified blob is in the cache. Concurrent downloads of
+// the same blob (in this or another process) wait for each other instead of
+// clobbering the data.
+func (d *Downloader) Download(ctx context.Context, b Blob, srcs []Source) error {
 	if _, err := cache.ParseDigest(b.Digest); err != nil {
 		return err
+	}
+	if len(srcs) == 0 {
+		return fmt.Errorf("no source for blob %s", b.Digest)
 	}
 	prog := d.Progress
 	if prog == nil {
@@ -103,7 +107,14 @@ func (d *Downloader) Download(ctx context.Context, b Blob, src Source) error {
 		return nil
 	}
 
-	j := &job{d: d, opts: d.Options.withDefaults(), blob: b, src: src, paths: paths, prog: prog, log: log}
+	opts := d.Options.withDefaults()
+	srcSet := newSources(srcs, opts.SwitchAfter, func(to Source, reason string) {
+		log.Info("switching source", "to", to.Name, "because", reason)
+		prog.Source(b.Digest, to.Name)
+	})
+	defer srcSet.close()
+	j := &job{d: d, opts: opts, blob: b, srcs: srcSet, paths: paths, prog: prog, log: log}
+
 	mismatches := 0
 	for round := 1; ; round++ {
 		err := j.run(ctx)
@@ -116,6 +127,7 @@ func (d *Downloader) Download(ctx context.Context, b Blob, src Source) error {
 		case errors.Is(err, ErrDigestMismatch):
 			if mismatches++; mismatches < maxMismatches {
 				log.Warn("downloaded data does not match its digest; downloading it again", "err", err)
+				srcSet.rotate("sent data that failed verification")
 				continue
 			}
 		}
@@ -132,13 +144,14 @@ type job struct {
 	d     *Downloader
 	opts  Options
 	blob  Blob
-	src   Source
+	srcs  *sources
 	paths cache.Partial
 	prog  Progress
 	log   *slog.Logger
 
-	file   *os.File
-	chunks []*chunk
+	file     *os.File
+	chunks   []*chunk
+	received atomic.Int64 // bytes received in this process, for speed checks
 }
 
 // run makes one pass: restore or plan the chunks, fetch what is missing,
@@ -151,6 +164,8 @@ func (j *job) run(ctx context.Context) error {
 	defer j.closeFile()
 
 	j.prog.Start(j.blob, j.completed())
+	src, _, _ := j.srcs.current()
+	j.prog.Source(j.blob.Digest, src.Name)
 	if pending := j.pending(); len(pending) > 0 {
 		err := j.fetchAll(ctx, pending)
 		if errors.Is(err, errRangeUnsupported) {
@@ -265,7 +280,7 @@ func (j *job) persist() error {
 }
 
 // fetchAll downloads the pending chunks with up to Connections workers while
-// periodically persisting progress.
+// periodically persisting progress and watching the transfer speed.
 func (j *job) fetchAll(ctx context.Context, pending []*chunk) error {
 	queue := make(chan *chunk, len(pending))
 	for _, c := range pending {
@@ -285,26 +300,15 @@ func (j *job) fetchAll(ctx context.Context, pending []*chunk) error {
 		})
 	}
 
-	stop, saverDone := make(chan struct{}), make(chan struct{})
+	stop, monitorDone := make(chan struct{}), make(chan struct{})
 	go func() {
-		defer close(saverDone)
-		t := time.NewTicker(j.opts.SaveInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				if err := j.persist(); err != nil {
-					j.log.Warn("could not save download progress", "err", err)
-				}
-			}
-		}
+		defer close(monitorDone)
+		j.monitor(stop)
 	}()
 
 	err := g.Wait()
 	close(stop)
-	<-saverDone
+	<-monitorDone
 	// Always save on the way out, including on Ctrl+C, so the next run
 	// resumes exactly where this one stopped.
 	if perr := j.persist(); perr != nil {
@@ -313,20 +317,78 @@ func (j *job) fetchAll(ctx context.Context, pending []*chunk) error {
 	return err
 }
 
+// monitor persists progress every SaveInterval and, when there is more than
+// one source, switches away from a source that stays below MinSpeed for a
+// whole SlowWindow.
+func (j *job) monitor(stop <-chan struct{}) {
+	save := time.NewTicker(j.opts.SaveInterval)
+	defer save.Stop()
+	speedCheck := j.opts.MinSpeed > 0 && len(j.srcs.list) > 1
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+
+	windowStart, windowBytes, windowGen := time.Now(), j.received.Load(), j.srcs.generation()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-save.C:
+			if err := j.persist(); err != nil {
+				j.log.Warn("could not save download progress", "err", err)
+			}
+		case now := <-tick.C:
+			if !speedCheck {
+				continue
+			}
+			if gen := j.srcs.generation(); gen != windowGen {
+				// A new source gets a full window before it is judged.
+				windowStart, windowBytes, windowGen = now, j.received.Load(), gen
+				continue
+			}
+			elapsed := now.Sub(windowStart)
+			if elapsed < j.opts.SlowWindow {
+				continue
+			}
+			got := j.received.Load()
+			speed := float64(got-windowBytes) / elapsed.Seconds()
+			if speed < float64(j.opts.MinSpeed) {
+				j.log.Debug("source below minimum speed", "bytes_per_sec", int64(speed), "min", j.opts.MinSpeed)
+				j.srcs.tooSlow()
+			}
+			windowStart, windowBytes, windowGen = now, got, j.srcs.generation()
+		}
+	}
+}
+
 // fetchChunk downloads the rest of c, retrying transient failures with
-// backoff. Attempts that made progress reset the failure count, so a flaky
-// connection keeps going as long as data trickles through.
+// backoff and moving between sources as they fail. Attempts that made
+// progress reset the failure count, so a flaky connection keeps going as
+// long as data trickles through.
 func (j *job) fetchChunk(ctx context.Context, c *chunk) error {
 	failures, authFailures := 0, 0
 	for !c.complete() {
-		progressed, err := j.fetchOnce(ctx, c)
+		progressed, gen, err := j.fetchOnce(ctx, c)
+		if progressed {
+			j.srcs.progressed(gen)
+		}
 		if err == nil {
 			continue
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if errors.Is(err, errRangeUnsupported) || isPermanent(err) {
+		if errors.Is(err, errSwitched) {
+			continue
+		}
+		if errors.Is(err, errRangeUnsupported) {
+			return err
+		}
+		var pe *permanentError
+		if errors.As(err, &pe) {
+			if !pe.local && j.srcs.unavailable(gen) {
+				failures = 0
+				continue
+			}
 			return err
 		}
 		if progressed {
@@ -343,11 +405,14 @@ func (j *job) fetchChunk(ctx context.Context, c *chunk) error {
 		if j.opts.MaxRetries > 0 && failures > j.opts.MaxRetries {
 			return fmt.Errorf("giving up after %d attempts: %w", failures, err)
 		}
+		j.prog.Retry(j.blob.Digest, failures, err)
+		if j.srcs.failed(gen) {
+			continue // a fresh source deserves an immediate try
+		}
 		delay := retry.Backoff(failures, j.opts.BackoffBase, j.opts.BackoffMax)
 		if isStatus && se.retryAfter > delay {
 			delay = se.retryAfter
 		}
-		j.prog.Retry(j.blob.Digest, failures, err)
 		j.log.Debug("segment failed; retrying", "offset", c.cursor(), "attempt", failures,
 			"delay", delay.Round(time.Millisecond), "err", err)
 		if err := retry.Sleep(ctx, delay); err != nil {
@@ -357,14 +422,18 @@ func (j *job) fetchChunk(ctx context.Context, c *chunk) error {
 	return nil
 }
 
-// fetchOnce issues one request for the rest of c and writes what arrives.
-// progressed reports whether any bytes were stored.
-func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err error) {
+// fetchOnce issues one request for the rest of c to the current source and
+// writes what arrives. progressed reports whether any bytes were stored; gen
+// is the source generation the request used.
+func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, gen int, err error) {
+	src, gen, genCtx := j.srcs.current()
 	start, end := c.cursor(), c.end
 	whole := c.start == 0 && c.end == j.blob.Size
 
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	stopOnSwitch := context.AfterFunc(genCtx, cancel)
+	defer stopOnSwitch()
 	var stalled atomic.Bool
 	watchdog := time.AfterFunc(j.opts.StallTimeout, func() {
 		stalled.Store(true)
@@ -372,15 +441,18 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err err
 	})
 	defer watchdog.Stop()
 	transient := func(err error) error {
-		if stalled.Load() {
-			return fmt.Errorf("%w: no data received for %s", errStalled, j.opts.StallTimeout)
+		switch {
+		case genCtx.Err() != nil:
+			return errSwitched
+		case stalled.Load():
+			return fmt.Errorf("%w: no data received from %s for %s", errStalled, src.Name, j.opts.StallTimeout)
 		}
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, j.src.URL, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, src.URL, nil)
 	if err != nil {
-		return false, &permanentError{err}
+		return false, gen, &permanentError{err: err}
 	}
 	// A whole-blob download from the beginning is a plain GET, which also
 	// works with servers that know nothing about ranges.
@@ -388,9 +460,9 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err err
 	if ranged {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
 	}
-	resp, err := j.src.Client.Do(req)
+	resp, err := src.Client.Do(req)
 	if err != nil {
-		return false, transient(err)
+		return false, gen, transient(err)
 	}
 	defer resp.Body.Close()
 
@@ -398,18 +470,18 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err err
 	case http.StatusPartialContent:
 		first, _, total, err := parseContentRange(resp.Header.Get("Content-Range"))
 		if err != nil {
-			return false, err
+			return false, gen, err
 		}
 		if first != start {
-			return false, fmt.Errorf("server sent a range starting at %d instead of %d", first, start)
+			return false, gen, fmt.Errorf("%s sent a range starting at %d instead of %d", src.Name, first, start)
 		}
 		if total >= 0 && total != j.blob.Size {
-			return false, &permanentError{fmt.Errorf("server reports a size of %d bytes, expected %d", total, j.blob.Size)}
+			return false, gen, &permanentError{err: fmt.Errorf("%s reports a size of %d bytes, expected %d", src.Name, total, j.blob.Size)}
 		}
 	case http.StatusOK:
 		if ranged {
 			if !whole {
-				return false, errRangeUnsupported
+				return false, gen, errRangeUnsupported
 			}
 			// Single-stream mode and the server ignored the resume offset:
 			// the body starts at byte 0, so start over.
@@ -418,7 +490,7 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err err
 			start = 0
 		}
 	default:
-		return false, classifyStatus(resp, req.URL.Host)
+		return false, gen, classifyStatus(resp, req.URL.Host)
 	}
 
 	buf := make([]byte, readBufferSize)
@@ -427,11 +499,12 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err err
 		if n > 0 {
 			watchdog.Reset(j.opts.StallTimeout)
 			if _, werr := j.file.WriteAt(buf[:n], off); werr != nil {
-				return progressed, &permanentError{fmt.Errorf("writing download data: %w", werr)}
+				return progressed, gen, &permanentError{err: fmt.Errorf("writing download data: %w", werr), local: true}
 			}
 			c.advance(buf[:n])
 			off += int64(n)
 			progressed = true
+			j.received.Add(int64(n))
 			j.prog.Add(j.blob.Digest, int64(n))
 		}
 		if rerr != nil {
@@ -441,16 +514,16 @@ func (j *job) fetchOnce(ctx context.Context, c *chunk) (progressed bool, err err
 			if rerr == io.EOF {
 				rerr = io.ErrUnexpectedEOF
 			}
-			return progressed, transient(rerr)
+			return progressed, gen, transient(rerr)
 		}
 	}
-	return progressed, nil
+	return progressed, gen, nil
 }
 
 // verifyAndCommit checks the blob digest and moves it into the cache. On a
 // mismatch it compares every chunk with the hash recorded while it was
 // received: chunks that changed on disk are re-fetched on their own; if none
-// changed, the source itself sent bad data and the blob starts over.
+// changed, a source itself sent bad data and the blob starts over.
 func (j *job) verifyAndCommit() error {
 	want := strings.TrimPrefix(j.blob.Digest, "sha256:")
 	full := sha256.New()

@@ -1,6 +1,6 @@
-// Package registry talks to OCI distribution (v2) registries: it resolves
-// image references to platform-specific manifests and hands out
-// authenticated blob endpoints for the download engine.
+// Package registry talks to OCI distribution (v2) registries and their
+// mirrors: it resolves image references to platform-specific manifests and
+// hands out authenticated blob sources for the download engine.
 package registry
 
 import (
@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -20,6 +22,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	"golang.org/x/net/http/httpproxy"
 
 	"github.com/Hkarimi561/ddm/internal/engine"
 	"github.com/Hkarimi561/ddm/internal/retry"
@@ -27,28 +30,34 @@ import (
 
 const userAgent = "ddm"
 
-// Client resolves images and blob endpoints.
+// Client resolves images and blob sources.
 type Client struct {
 	// Keychain supplies credentials. authn.DefaultKeychain reads
 	// ~/.docker/config.json, including credential helpers.
 	Keychain   authn.Keychain
 	Transport  http.RoundTripper
 	MaxRetries int // 0 = retry transient failures forever
-	Log        *slog.Logger
+	// Mirrors maps upstream registries ("docker.io") to mirror URLs, tried
+	// in order before the upstream itself (see Endpoints).
+	Mirrors map[string][]string
+	Log     *slog.Logger
 }
 
-// NewClient returns a client using Docker's credentials and NewTransport.
-func NewClient(log *slog.Logger) *Client {
-	return &Client{Keychain: authn.DefaultKeychain, Transport: NewTransport(), Log: log}
+// NewClient returns a client using Docker's credentials and the given
+// transport.
+func NewClient(t http.RoundTripper, mirrors map[string][]string, log *slog.Logger) *Client {
+	return &Client{Keychain: authn.DefaultKeychain, Transport: t, Mirrors: mirrors, Log: log}
 }
 
-// NewTransport returns the base HTTP transport. It honors HTTP_PROXY,
-// HTTPS_PROXY and NO_PROXY, and speaks HTTP/1.1 only: segmented downloads
-// help on lossy links because every segment gets its own TCP connection,
-// and HTTP/2 would multiplex them all over a single one.
-func NewTransport() *http.Transport {
+// NewTransport returns the base HTTP transport. It speaks HTTP/1.1 only:
+// segmented downloads help on lossy links because every segment gets its own
+// TCP connection, and HTTP/2 would multiplex them all over a single one.
+func NewTransport(proxy func(*http.Request) (*url.URL, error)) *http.Transport {
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
 	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxy,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -64,6 +73,23 @@ func NewTransport() *http.Transport {
 	}
 }
 
+// ProxyFunc returns the proxy selection for all registry traffic: the
+// configured proxy (http://, https:// or socks5://) when set, otherwise
+// HTTP_PROXY / HTTPS_PROXY. Hosts in noProxy (default $NO_PROXY) bypass it.
+func ProxyFunc(proxy, noProxy string) func(*http.Request) (*url.URL, error) {
+	if proxy == "" {
+		return http.ProxyFromEnvironment
+	}
+	if noProxy == "" {
+		noProxy = os.Getenv("NO_PROXY")
+		if noProxy == "" {
+			noProxy = os.Getenv("no_proxy")
+		}
+	}
+	pf := (&httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy, NoProxy: noProxy}).ProxyFunc()
+	return func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
+}
+
 // Descriptor describes a blob.
 type Descriptor struct {
 	MediaType string
@@ -73,7 +99,8 @@ type Descriptor struct {
 
 // Image is a resolved, platform-specific image manifest.
 type Image struct {
-	Ref               name.Reference
+	Ref               name.Reference // the reference as requested, on the upstream registry
+	Source            string         // endpoint the manifest came from
 	Platform          v1.Platform
 	IndexDigest       string // set when Ref names a multi-platform index
 	ManifestDigest    string
@@ -83,29 +110,76 @@ type Image struct {
 	Layers            []Descriptor
 }
 
-// ResolveImage fetches the manifest for ref, picking the entry for platform
-// when ref names a multi-platform index. Transient failures are retried.
+// LargestLayer returns the biggest layer, or false if there is none.
+func (img *Image) LargestLayer() (Descriptor, bool) {
+	var best Descriptor
+	for _, l := range img.Layers {
+		if l.Size > best.Size {
+			best = l
+		}
+	}
+	return best, best.Digest != ""
+}
+
+// ResolveImage fetches the manifest for ref from the first endpoint that can
+// serve it, picking the entry for platform when ref names a multi-platform
+// index. Transient failures are retried, cycling through the endpoints.
 func (c *Client) ResolveImage(ctx context.Context, ref name.Reference, platform v1.Platform) (*Image, error) {
-	var (
-		desc *remote.Descriptor
-		img  v1.Image
-		raw  []byte
-	)
+	eps := c.Endpoints(ref.Context().Registry)
+	var img *Image
+	var upstreamErr error
 	err := c.retry(ctx, "fetching manifest", func() error {
-		var err error
-		if desc, err = remote.Get(ref, c.options(ctx, platform)...); err != nil {
-			return err
+		var firstTransient error
+		for _, ep := range eps {
+			im, err := c.resolveAt(ctx, ep, ref, platform)
+			if err == nil {
+				img = im
+				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if len(eps) > 1 {
+				c.logger().Warn("could not fetch manifest; trying the next mirror", "from", ep.Name, "err", err)
+			}
+			if ep.Upstream {
+				upstreamErr = err
+			}
+			if firstTransient == nil && transient(err) {
+				firstTransient = fmt.Errorf("%s: %w", ep.Name, err)
+			}
 		}
-		if img, err = desc.Image(); err != nil {
-			return err
+		if firstTransient != nil {
+			return firstTransient
 		}
-		raw, err = img.RawManifest()
-		return err
+		// Every endpoint gave a definite answer; the upstream's is the one
+		// that counts (a mirror may simply not have the image).
+		return upstreamErr
 	})
 	if err != nil {
 		return nil, describe(ref, platform, err)
 	}
+	return img, nil
+}
 
+// ResolveAt fetches the manifest for ref from one endpoint, without retries.
+func (c *Client) ResolveAt(ctx context.Context, ep Endpoint, ref name.Reference, platform v1.Platform) (*Image, error) {
+	return c.resolveAt(ctx, ep, ref, platform)
+}
+
+func (c *Client) resolveAt(ctx context.Context, ep Endpoint, ref name.Reference, platform v1.Platform) (*Image, error) {
+	desc, err := remote.Get(ep.Ref(ref), c.options(ctx, platform)...)
+	if err != nil {
+		return nil, err
+	}
+	img, err := desc.Image()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := img.RawManifest()
+	if err != nil {
+		return nil, err
+	}
 	mt, err := img.MediaType()
 	if err != nil {
 		return nil, err
@@ -121,6 +195,7 @@ func (c *Client) ResolveImage(ctx context.Context, ref name.Reference, platform 
 
 	out := &Image{
 		Ref:               ref,
+		Source:            ep.Name,
 		Platform:          platform,
 		ManifestDigest:    dgst.String(),
 		ManifestMediaType: string(mt),
@@ -135,8 +210,7 @@ func (c *Client) ResolveImage(ctx context.Context, ref name.Reference, platform 
 		out.IndexDigest = desc.Digest.String()
 	}
 	if !isImageConfig(m.Config.MediaType) {
-		return nil, fmt.Errorf("%s is not a container image (its config type is %s); if it is a Docker model, use `ddm model pull`",
-			ref, m.Config.MediaType)
+		return nil, &notImageError{ref: ref, mediaType: string(m.Config.MediaType)}
 	}
 	for _, l := range m.Layers {
 		if !l.MediaType.IsDistributable() {
@@ -147,40 +221,86 @@ func (c *Client) ResolveImage(ctx context.Context, ref name.Reference, platform 
 	return out, nil
 }
 
+type notImageError struct {
+	ref       name.Reference
+	mediaType string
+}
+
+func (e *notImageError) Error() string {
+	return fmt.Sprintf("%s is not a container image (its config type is %s); if it is a Docker model, use `ddm model pull`", e.ref, e.mediaType)
+}
+
 func isImageConfig(mt types.MediaType) bool {
 	return mt == types.DockerConfigJSON || mt == types.OCIConfigJSON
 }
 
-// BlobEndpoint is an authenticated handle on a repository's blobs.
+// BlobEndpoint is an authenticated handle on one endpoint's copy of a
+// repository's blobs.
 type BlobEndpoint struct {
-	name   string
+	Name   string
 	base   string
 	client *http.Client
 }
 
 // Source returns the engine source for one blob.
 func (e *BlobEndpoint) Source(digest string) engine.Source {
-	return engine.Source{Name: e.name, URL: e.base + digest, Client: e.client}
+	return engine.Source{Name: e.Name, URL: e.base + digest, Client: e.client}
 }
 
-// BlobEndpoint authenticates against repo's registry (anonymous, basic or
-// bearer token, as the registry demands) and returns a blob endpoint whose
-// client refreshes tokens as they expire.
-func (c *Client) BlobEndpoint(ctx context.Context, repo name.Repository) (*BlobEndpoint, error) {
-	var rt http.RoundTripper
-	err := c.retry(ctx, "connecting to "+repo.RegistryStr(), func() error {
-		auth, err := c.Keychain.Resolve(repo)
-		if err != nil {
-			return fmt.Errorf("reading credentials for %s: %w", repo.RegistryStr(), err)
+// Sources returns one engine source per endpoint, in order.
+func Sources(eps []*BlobEndpoint, digest string) []engine.Source {
+	out := make([]engine.Source, len(eps))
+	for i, e := range eps {
+		out[i] = e.Source(digest)
+	}
+	return out
+}
+
+// BlobEndpoints authenticates against every endpoint that serves repo and
+// returns those that answered, in order. Endpoints that are down are
+// skipped; it fails only when none can be reached.
+func (c *Client) BlobEndpoints(ctx context.Context, repo name.Repository) ([]*BlobEndpoint, error) {
+	eps := c.Endpoints(repo.Registry)
+	var out []*BlobEndpoint
+	err := c.retry(ctx, "connecting to the registry", func() error {
+		var firstErr error
+		for _, ep := range eps {
+			be, err := c.BlobEndpoint(ctx, ep, repo)
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				c.logger().Warn("skipping unreachable mirror", "mirror", ep.Name, "err", err)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s: %w", ep.Name, err)
+				}
+				continue
+			}
+			out = append(out, be)
 		}
-		rt, err = transport.NewWithContext(ctx, repo.Registry, auth, c.Transport, []string{repo.Scope(transport.PullScope)})
-		return err
+		if len(out) == 0 {
+			return firstErr
+		}
+		return nil
 	})
+	return out, err
+}
+
+// BlobEndpoint authenticates against one endpoint (anonymous, basic or
+// bearer token, as it demands) and returns a blob endpoint whose client
+// refreshes tokens as they expire.
+func (c *Client) BlobEndpoint(ctx context.Context, ep Endpoint, upstream name.Repository) (*BlobEndpoint, error) {
+	repo := ep.Repo(upstream)
+	auth, err := c.Keychain.Resolve(repo)
+	if err != nil {
+		return nil, fmt.Errorf("reading credentials for %s: %w", repo.RegistryStr(), err)
+	}
+	rt, err := transport.NewWithContext(ctx, repo.Registry, auth, c.Transport, []string{repo.Scope(transport.PullScope)})
 	if err != nil {
 		return nil, err
 	}
 	return &BlobEndpoint{
-		name:   repo.RegistryStr(),
+		Name:   ep.Name,
 		base:   fmt.Sprintf("%s://%s/v2/%s/blobs/", repo.Scheme(), repo.RegistryStr(), repo.RepositoryStr()),
 		client: &http.Client{Transport: rt},
 	}, nil
@@ -249,6 +369,10 @@ func describe(ref name.Reference, platform v1.Platform, err error) error {
 		case http.StatusNotFound:
 			return fmt.Errorf("%s was not found: check the image name and tag\n  (%w)", ref, err)
 		}
+	}
+	var nie *notImageError
+	if errors.As(err, &nie) {
+		return err
 	}
 	if !transient(err) {
 		return fmt.Errorf("resolving %s for %s: %w (use --platform to pick another platform)", ref, platform.String(), err)

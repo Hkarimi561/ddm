@@ -78,7 +78,7 @@ func newTestPuller(t *testing.T) (*Puller, Options) {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	rc := &registry.Client{Keychain: authn.NewMultiKeychain(), Transport: registry.NewTransport(), MaxRetries: 3, Log: log}
+	rc := &registry.Client{Keychain: authn.NewMultiKeychain(), Transport: registry.NewTransport(nil), MaxRetries: 3, Log: log}
 	p := &Puller{Cache: c, Registry: rc, Out: io.Discard, Log: log}
 	opts := Options{ParallelBlobs: 2, Engine: engine.Options{
 		BackoffBase:  time.Millisecond,

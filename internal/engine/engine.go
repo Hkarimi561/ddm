@@ -38,6 +38,11 @@ type Options struct {
 	SaveInterval time.Duration // how often progress is persisted while downloading
 	MinChunkSize int64
 	MaxChunkSize int64
+
+	// Mirror fallback, used when a blob has more than one source.
+	SwitchAfter int           // consecutive failures before trying the next source
+	MinSpeed    int64         // bytes/s; below this over SlowWindow, try the next source (0 = never)
+	SlowWindow  time.Duration // how long a source gets before its speed is judged
 }
 
 // DefaultOptions returns the default tuning.
@@ -50,6 +55,9 @@ func DefaultOptions() Options {
 		SaveInterval: time.Second,
 		MinChunkSize: 1 << 20,
 		MaxChunkSize: 32 << 20,
+		SwitchAfter:  3,
+		MinSpeed:     32 << 10,
+		SlowWindow:   30 * time.Second,
 	}
 }
 
@@ -79,6 +87,15 @@ func (o Options) withDefaults() Options {
 	if o.MaxChunkSize < o.MinChunkSize {
 		o.MaxChunkSize = o.MinChunkSize
 	}
+	if o.SwitchAfter < 1 {
+		o.SwitchAfter = def.SwitchAfter
+	}
+	if o.SlowWindow <= 0 {
+		o.SlowWindow = def.SlowWindow
+	}
+	if o.MinSpeed < 0 {
+		o.MinSpeed = 0
+	}
 	return o
 }
 
@@ -91,6 +108,8 @@ type Progress interface {
 	// Set replaces the byte count, e.g. after data had to be discarded.
 	Set(digest string, current int64)
 	Retry(digest string, attempt int, err error)
+	// Source reports the source (mirror) the blob is now fetched from.
+	Source(digest, name string)
 	Done(digest string)
 	Fail(digest string, err error)
 }
@@ -98,6 +117,7 @@ type Progress interface {
 type nopProgress struct{}
 
 func (nopProgress) Start(Blob, int64)        {}
+func (nopProgress) Source(string, string)    {}
 func (nopProgress) Add(string, int64)        {}
 func (nopProgress) Set(string, int64)        {}
 func (nopProgress) Retry(string, int, error) {}

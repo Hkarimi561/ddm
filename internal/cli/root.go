@@ -13,14 +13,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Hkarimi561/ddm/internal/cache"
+	"github.com/Hkarimi561/ddm/internal/config"
+	"github.com/Hkarimi561/ddm/internal/registry"
 )
 
 // Version is reported by `ddm --version`.
 var Version = "dev"
 
 type globals struct {
-	verbose  bool
-	cacheDir string
+	verbose    bool
+	cacheDir   string
+	configPath string
+
+	cfg *config.File
 }
 
 // Execute runs ddm and returns the process exit code.
@@ -60,10 +65,12 @@ they stopped, even after a reboot.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.PersistentFlags().BoolVar(&g.verbose, "verbose", false, "print debug logs")
-	root.PersistentFlags().StringVar(&g.cacheDir, "cache-dir", "", "blob cache directory (default: $DDM_CACHE_DIR or the OS cache directory)")
+	pf := root.PersistentFlags()
+	pf.BoolVar(&g.verbose, "verbose", false, "print debug logs")
+	pf.StringVar(&g.cacheDir, "cache-dir", "", "blob cache directory (default: $DDM_CACHE_DIR, cache_dir from the config, or the OS cache directory)")
+	pf.StringVar(&g.configPath, "config", "", "config file (default: $DDM_CONFIG or the OS config directory)")
 
-	root.AddCommand(newPullCmd(g))
+	root.AddCommand(newPullCmd(g), newConfigCmd(g), newMirrorCmd(g))
 	return root
 }
 
@@ -83,8 +90,40 @@ func (g *globals) logger() *slog.Logger {
 	}))
 }
 
+// config loads the configuration file once.
+func (g *globals) config() (*config.File, error) {
+	if g.cfg != nil {
+		return g.cfg, nil
+	}
+	path := g.configPath
+	if path == "" {
+		var err error
+		if path, err = config.Path(); err != nil {
+			return nil, err
+		}
+	}
+	f, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	g.cfg = f
+	return f, nil
+}
+
+// cache opens the blob cache. Its location comes from --cache-dir, then
+// $DDM_CACHE_DIR, then cache_dir in the config, then the OS default.
 func (g *globals) cache() (*cache.Cache, error) {
 	root := g.cacheDir
+	if root == "" {
+		root = os.Getenv("DDM_CACHE_DIR")
+	}
+	if root == "" {
+		cfg, err := g.config()
+		if err != nil {
+			return nil, err
+		}
+		root = cfg.Config.CacheDir
+	}
 	if root == "" {
 		var err error
 		if root, err = cache.DefaultRoot(); err != nil {
@@ -92,4 +131,18 @@ func (g *globals) cache() (*cache.Cache, error) {
 		}
 	}
 	return cache.New(root)
+}
+
+// registryClient builds a registry client with the configured proxy and
+// mirrors.
+func (g *globals) registryClient(log *slog.Logger) (*registry.Client, error) {
+	cfg, err := g.config()
+	if err != nil {
+		return nil, err
+	}
+	c := cfg.Config
+	t := registry.NewTransport(registry.ProxyFunc(c.Proxy, c.NoProxy))
+	rc := registry.NewClient(t, c.Mirrors, log)
+	rc.MaxRetries = c.Retries
+	return rc, nil
 }

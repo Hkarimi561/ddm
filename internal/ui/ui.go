@@ -5,6 +5,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"golang.org/x/term"
 
@@ -24,6 +25,15 @@ func NewReporter(f *os.File, total int64, plain bool) Reporter {
 		return newLines(f, total)
 	}
 	return newBars(f, total)
+}
+
+// hostOf shortens a source name like "https://mirror.example.com/proxy" to
+// "mirror.example.com/proxy" for display.
+func hostOf(name string) string {
+	if _, rest, ok := strings.Cut(name, "://"); ok {
+		return rest
+	}
+	return name
 }
 
 // HumanBytes formats n using binary units, e.g. "1.5 GiB".

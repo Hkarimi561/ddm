@@ -11,8 +11,12 @@ import (
 // go-containerregistry.
 const DockerHub = "index.docker.io"
 
+// HuggingFace is the canonical name of the Hugging Face Hub.
+const HuggingFace = "huggingface.co"
+
 // NormalizeRegistry turns the ways people write a registry ("docker.io",
-// "https://registry-1.docker.io/", "GHCR.io") into one comparable form.
+// "https://registry-1.docker.io/", "GHCR.io", "hf.co") into one comparable
+// form.
 func NormalizeRegistry(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://")
@@ -20,6 +24,8 @@ func NormalizeRegistry(s string) string {
 	switch s {
 	case "docker.io", "index.docker.io", "registry-1.docker.io", "registry.hub.docker.com", "hub.docker.com":
 		return DockerHub
+	case "hf.co", "huggingface.co", "www.huggingface.co":
+		return HuggingFace
 	}
 	return s
 }

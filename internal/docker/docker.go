@@ -99,6 +99,21 @@ func (c *CLI) Tag(ctx context.Context, src, dst string) error {
 	return err
 }
 
+// Stream runs a docker command with its output going to w, and returns
+// the tail of its error output for diagnosis when it fails.
+func (c *CLI) Stream(ctx context.Context, w io.Writer, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, c.Bin, c.args(args...)...)
+	var errBuf bytes.Buffer
+	cmd.Stdout = w
+	cmd.Stderr = io.MultiWriter(w, &errBuf)
+	err := cmd.Run()
+	tail := strings.TrimSpace(errBuf.String())
+	if len(tail) > 2000 {
+		tail = tail[len(tail)-2000:]
+	}
+	return tail, err
+}
+
 // Output runs a docker command and returns its trimmed standard output.
 func (c *CLI) Output(ctx context.Context, args ...string) (string, error) {
 	return c.run(ctx, args...)

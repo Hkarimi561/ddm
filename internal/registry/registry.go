@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -125,13 +126,30 @@ func (img *Image) LargestLayer() (Descriptor, bool) {
 // serve it, picking the entry for platform when ref names a multi-platform
 // index. Transient failures are retried, cycling through the endpoints.
 func (c *Client) ResolveImage(ctx context.Context, ref name.Reference, platform v1.Platform) (*Image, error) {
+	return c.resolve(ctx, ref, platform, kindImage)
+}
+
+// ResolveModel fetches the manifest of a Docker model (an OCI artifact with
+// a model config) the same way.
+func (c *Client) ResolveModel(ctx context.Context, ref name.Reference) (*Image, error) {
+	return c.resolve(ctx, ref, v1.Platform{OS: "linux", Architecture: runtime.GOARCH}, kindModel)
+}
+
+type artifactKind int
+
+const (
+	kindImage artifactKind = iota
+	kindModel
+)
+
+func (c *Client) resolve(ctx context.Context, ref name.Reference, platform v1.Platform, kind artifactKind) (*Image, error) {
 	eps := c.Endpoints(ref.Context().Registry)
 	var img *Image
 	var upstreamErr error
 	err := c.retry(ctx, "fetching manifest", func() error {
 		var firstTransient error
 		for _, ep := range eps {
-			im, err := c.resolveAt(ctx, ep, ref, platform)
+			im, err := c.resolveAt(ctx, ep, ref, platform, kind)
 			if err == nil {
 				img = im
 				return nil
@@ -164,10 +182,10 @@ func (c *Client) ResolveImage(ctx context.Context, ref name.Reference, platform 
 
 // ResolveAt fetches the manifest for ref from one endpoint, without retries.
 func (c *Client) ResolveAt(ctx context.Context, ep Endpoint, ref name.Reference, platform v1.Platform) (*Image, error) {
-	return c.resolveAt(ctx, ep, ref, platform)
+	return c.resolveAt(ctx, ep, ref, platform, kindImage)
 }
 
-func (c *Client) resolveAt(ctx context.Context, ep Endpoint, ref name.Reference, platform v1.Platform) (*Image, error) {
+func (c *Client) resolveAt(ctx context.Context, ep Endpoint, ref name.Reference, platform v1.Platform, kind artifactKind) (*Image, error) {
 	desc, err := remote.Get(ep.Ref(ref), c.options(ctx, platform)...)
 	if err != nil {
 		return nil, err
@@ -209,8 +227,11 @@ func (c *Client) resolveAt(ctx context.Context, ep Endpoint, ref name.Reference,
 	if desc.MediaType.IsIndex() {
 		out.IndexDigest = desc.Digest.String()
 	}
-	if !isImageConfig(m.Config.MediaType) {
+	switch {
+	case kind == kindImage && !isImageConfig(m.Config.MediaType):
 		return nil, &notImageError{ref: ref, mediaType: string(m.Config.MediaType)}
+	case kind == kindModel && !IsModelConfig(string(m.Config.MediaType)):
+		return nil, &notModelError{ref: ref, mediaType: string(m.Config.MediaType)}
 	}
 	for _, l := range m.Layers {
 		if !l.MediaType.IsDistributable() {
@@ -229,6 +250,25 @@ type notImageError struct {
 func (e *notImageError) Error() string {
 	return fmt.Sprintf("%s is not a container image (its config type is %s); if it is a Docker model, use `ddm model pull`", e.ref, e.mediaType)
 }
+
+type notModelError struct {
+	ref       name.Reference
+	mediaType string
+}
+
+func (e *notModelError) Error() string {
+	return fmt.Sprintf("%s is not a Docker model (its config type is %s); for container images use `ddm pull`", e.ref, e.mediaType)
+}
+
+// Config media types Docker Model Runner accepts.
+var modelConfigTypes = map[string]bool{
+	"application/vnd.docker.ai.model.config.v0.1+json": true,
+	"application/vnd.docker.ai.model.config.v0.2+json": true,
+	"application/vnd.cncf.model.config.v1+json":        true,
+}
+
+// IsModelConfig reports whether mt is a model config media type.
+func IsModelConfig(mt string) bool { return modelConfigTypes[mt] }
 
 func isImageConfig(mt types.MediaType) bool {
 	return mt == types.DockerConfigJSON || mt == types.OCIConfigJSON
@@ -371,7 +411,8 @@ func describe(ref name.Reference, platform v1.Platform, err error) error {
 		}
 	}
 	var nie *notImageError
-	if errors.As(err, &nie) {
+	var nme *notModelError
+	if errors.As(err, &nie) || errors.As(err, &nme) {
 		return err
 	}
 	if !transient(err) {

@@ -146,6 +146,12 @@ func (f *FlakyRegistry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ServeBlob serves a stored blob with the registry's failure behavior, for
+// fake servers with other URL schemes (e.g. the Hugging Face Hub).
+func (f *FlakyRegistry) ServeBlob(w http.ResponseWriter, r *http.Request, digest string) {
+	f.serveBlob(w, r, digest)
+}
+
 func (f *FlakyRegistry) serveManifest(w http.ResponseWriter, r *http.Request, ref string) {
 	m, ok := f.Manifests[ref]
 	if !ok {

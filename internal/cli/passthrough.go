@@ -73,6 +73,9 @@ func prepare(ctx context.Context, g *globals, cli *docker.CLI, args []string) (b
 		return false, nil
 	}
 	cli.Global = cmd.Global
+	if cmd.Kind == dockercmd.ModelRun || cmd.Kind == dockercmd.ModelPull {
+		return prepareModel(ctx, g, cli, cmd)
+	}
 	log := g.logger()
 
 	images := cmd.Images
@@ -129,4 +132,32 @@ func prepare(ctx context.Context, g *globals, cli *docker.CLI, args []string) (b
 		fmt.Fprintf(os.Stderr, "ddm: could not download %s: %v\nddm: leaving it to docker.\n", img.Ref, err)
 	}
 	return update && allDone, nil
+}
+
+// prepareModel handles `docker model run|pull`: Model Runner must be
+// installed and running (ddm explains how, and offers to enable it), then a
+// missing model is downloaded and loaded by ddm before docker runs.
+func prepareModel(ctx context.Context, g *globals, cli *docker.CLI, cmd dockercmd.Command) (bool, error) {
+	mp, err := g.modelPuller(ctx, os.Stderr, true, cli)
+	if err != nil {
+		return false, err
+	}
+	if cmd.Kind == dockercmd.ModelRun {
+		if ok, err := mp.Present(ctx, cmd.Model); err == nil && ok {
+			return false, nil
+		}
+	}
+	err = mp.Pull(ctx, cmd.Model)
+	if err == nil {
+		return cmd.Kind == dockercmd.ModelPull, nil
+	}
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	var noSpace *pull.NoSpaceError
+	if errors.As(err, &noSpace) {
+		return false, err
+	}
+	fmt.Fprintf(os.Stderr, "ddm: could not download %s: %v\nddm: leaving it to docker.\n", cmd.Model, err)
+	return false, nil
 }

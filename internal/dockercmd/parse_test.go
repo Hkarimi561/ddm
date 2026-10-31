@@ -39,13 +39,37 @@ func TestParse(t *testing.T) {
 		{"--context remote run nginx", Run, []Image{{Ref: "nginx"}}, []string{"--context", "remote"}},
 		{"-H tcp://10.0.0.2:2375 --debug pull redis", Pull, []Image{{Ref: "redis"}}, []string{"-H", "tcp://10.0.0.2:2375", "--debug"}},
 		{"--config=/tmp/cfg -c dev run alpine", Run, []Image{{Ref: "alpine"}}, []string{"--config=/tmp/cfg", "-c", "dev"}},
-		{"model run ai/smollm2", Other, nil, nil},
+		{"model ls", Other, nil, nil},
+		{"model run", Other, nil, nil},
 	}
 	for _, tt := range tests {
 		got := Parse(strings.Fields(tt.cmd))
 		if got.Kind != tt.kind || !reflect.DeepEqual(got.Images, tt.images) || !reflect.DeepEqual(got.Global, tt.global) {
 			t.Errorf("Parse(%q) = kind %v images %v global %v; want kind %v images %v global %v",
 				tt.cmd, got.Kind, got.Images, got.Global, tt.kind, tt.images, tt.global)
+		}
+	}
+}
+
+func TestParseModel(t *testing.T) {
+	tests := []struct {
+		cmd   string
+		kind  Kind
+		model string
+	}{
+		{"model run ai/smollm2", ModelRun, "ai/smollm2"},
+		{"model run ai/smollm2 Tell me a joke", ModelRun, "ai/smollm2"},
+		{"model run -d --debug hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M", ModelRun, "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M"},
+		{"model run --backend llama.cpp gemma3 hi", ModelRun, "gemma3"},
+		{"model pull ai/gemma3", ModelPull, "ai/gemma3"},
+		{"model pull --ignore-runtime-memory-check ai/gemma3", ModelPull, "ai/gemma3"},
+		{"--context desk model pull ai/gemma3", ModelPull, "ai/gemma3"},
+		{"model rm ai/gemma3", Other, ""},
+	}
+	for _, tt := range tests {
+		got := Parse(strings.Fields(tt.cmd))
+		if got.Kind != tt.kind || got.Model != tt.model {
+			t.Errorf("Parse(%q) = kind %v model %q; want %v %q", tt.cmd, got.Kind, got.Model, tt.kind, tt.model)
 		}
 	}
 }

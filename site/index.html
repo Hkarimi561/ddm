@@ -237,6 +237,7 @@
       <a class="hide-sm" href="#features">Features</a>
       <a class="hide-sm" href="#mirrors">Mirrors</a>
       <a class="hide-sm" href="#passthrough">Pass-through</a>
+      <a class="hide-sm" href="#models">Models</a>
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#usage">Usage</a>
       <a id="gh-link" href="#">GitHub</a>
@@ -248,7 +249,7 @@
       <div class="hero-text">
         <span class="pill"><span class="dot"></span><span id="version-pill">Docker download manager</span></span>
         <h1>Docker pulls that <em>survive</em> bad networks.</h1>
-        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped. If a mirror lets you down, it moves to the next one without losing a byte. And you can keep typing <code>docker</code>: ddm steps in only when a command needs something downloaded.</p>
+        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped. If a mirror lets you down, it moves to the next one without losing a byte. And you can keep typing <code>docker</code>: ddm steps in only when a command needs something downloaded, AI models for Docker Model Runner included.</p>
 
         <div class="install" id="install">
           <div class="tabs" role="tablist">
@@ -445,6 +446,71 @@ shop-db-1
       </div>
     </section>
 
+    <section id="models">
+      <h2>AI models that arrive in one piece</h2>
+      <p class="sub">Models for Docker Model Runner run to gigabytes, which is exactly where a flaky connection hurts. <code>ddm model pull</code> downloads them with the same resumable, verified engine, then loads them into Model Runner under the name <code>docker model</code> expects.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="m3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></div>
+          <h3>Docker Hub &amp; registries</h3>
+          <p>Models such as <code>ai/smollm2</code> come down in segments, resume after any interruption, and use your mirrors. They're loaded with their original manifest, so the model ID matches a normal <code>docker model pull</code>.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><circle cx="9" cy="10" r=".8"/><circle cx="15" cy="10" r=".8"/></svg></div>
+          <h3>Hugging Face (<code>hf.co/…</code>)</h3>
+          <p>When Model Runner downloads from Hugging Face itself, any error starts the file over and nothing checks its contents. ddm resumes, verifies every file against the Hub's sha256, and picks the same quantization (Q4_K_M unless you name one). It also works through mirrors like hf-mirror.com.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></div>
+          <h3>Checks before it starts</h3>
+          <p>Is the <code>docker model</code> plugin installed and the runner running? If not, ddm says how to fix it and offers to turn the runner on, after asking. It also warns when a model won't fit in memory or GPU memory.</p>
+        </div>
+      </div>
+
+      <div class="term" style="margin-top: 20px">
+        <div class="term-bar"><i></i><i></i><i></i>
+          <div class="term-tabs" role="tablist" aria-label="Model examples">
+            <button role="tab" aria-selected="true" data-pane="md-hf">hf.co</button>
+            <button role="tab" aria-selected="false" data-pane="md-hub">docker hub</button>
+            <button role="tab" aria-selected="false" data-pane="md-run">docker model run</button>
+          </div>
+        </div>
+<pre class="wrap pane" id="md-hf"><span class="t-g">~</span> <span class="t-dim">$</span> ddm model pull hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+<span class="t-ddm">Looking up bartowski/Llama-3.2-3B-Instruct-GGUF on the Hugging Face Hub
+Listed through https://hf-mirror.com
+Downloading 1 file(s) (1.9 GiB)
+Llama-3.2-3B-Instruct-Q4_K   retries:3 [<span class="t-g">█████████████</span><span class="t-dim">░░░░░░░░░</span>] 1.2 GiB / 1.9 GiB  2.4 MiB/s  via hf-mirror.com</span>
+<span class="t-dim">  ...three dropped connections later, still not a byte downloaded twice:</span>
+<span class="t-ddm">Packaging huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M for Docker Model Runner</span>
+<span class="t-dim">(docker model package output)</span>
+<span class="t-ddm">Loaded model huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M</span>
+<span class="t-g">~</span> <span class="t-dim">$</span> </pre>
+<pre class="wrap pane" id="md-hub" hidden><span class="t-g">~</span> <span class="t-dim">$</span> ddm model pull ai/smollm2
+<span class="t-ddm">Resolving ai/smollm2:latest
+Downloading 3 of 3 blobs (256.4 MiB)
+total                         [<span class="t-g">██████████████████████</span>] 256.4 MiB / 256.4 MiB  done
+Loading ai/smollm2:latest into Docker Model Runner
+Loaded model ai/smollm2:latest</span>
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm model pull ai/smollm2
+<span class="t-ddm">Resolving ai/smollm2:latest
+ai/smollm2:latest is up to date.</span>
+<span class="t-g">~</span> <span class="t-dim">$</span> </pre>
+<pre class="wrap pane" id="md-run" hidden><span class="t-g">~</span> <span class="t-dim">$</span> docker model run ai/gemma3 "Say hi in five words"     <span class="t-dim"># with ddm shell-init</span>
+<span class="t-ddm">Docker Model Runner is not running.
+Start it with `docker model install-runner` (see `docker model install-runner --help` for GPU options).
+Run `docker model install-runner` now? [y/N]</span> y
+<span class="t-dim">(the runner image is fetched by ddm, then docker starts the runner)</span>
+<span class="t-ddm">Resolving ai/gemma3:latest
+Downloading 3 of 3 blobs (2.3 GiB)
+total                         [<span class="t-g">██████████████████████</span>] 2.3 GiB / 2.3 GiB      done
+Loading ai/gemma3:latest into Docker Model Runner
+Loaded model ai/gemma3:latest</span>
+Hi there, nice to meet you!
+<span class="t-g">~</span> <span class="t-dim">$</span> </pre>
+        <div class="legend-row"><span><i style="background:#c4b5fd"></i>ddm</span><span><i style="background:var(--term-text)"></i>docker</span></div>
+      </div>
+    </section>
+
     <section id="how">
       <h2>How it works</h2>
       <p class="sub">ddm skips Docker's downloader and only hands Docker the finished result. No network is involved in that last step.</p>
@@ -479,6 +545,10 @@ shop-db-1
             <tr><td><code>ddm docker compose up -d</code></td><td>Download the project's missing images, then run compose</td></tr>
             <tr><td><code>ddm doctor</code></td><td>Check Docker, the cache, the config and every registry endpoint</td></tr>
             <tr><td><code>ddm shell-init bash</code></td><td>Print a <code>docker</code> function that goes through ddm</td></tr>
+            <tr><td><code>ddm model pull ai/smollm2</code></td><td>Download a model and load it into Docker Model Runner</td></tr>
+            <tr><td><code>ddm model pull hf.co/org/repo:Q4_K_M</code></td><td>Download a Hugging Face GGUF model, verified file by file</td></tr>
+            <tr><td><code>ddm docker model run ai/gemma3</code></td><td>Check the runner, fetch the model if missing, then run it</td></tr>
+            <tr><td><code>ddm mirror add hf.co https://hf-mirror.com</code></td><td>Fetch Hugging Face models through a mirror</td></tr>
           </tbody>
         </table>
       </div>
@@ -491,7 +561,7 @@ shop-db-1
         <div class="done"><b>Resumable engine</b><code>ddm pull</code> and the Docker import</div>
         <div class="done"><b>Mirrors &amp; config</b>Mirror fallback, <code>ddm mirror test</code>, proxies, config file <em>(in testing)</em></div>
         <div class="done"><b>Pass-through &amp; doctor</b><code>ddm docker …</code>, <code>ddm doctor</code>, <code>ddm shell-init</code> <em>(in testing)</em></div>
-        <div><b>Docker models</b><code>ddm model pull</code> for Docker Model Runner</div>
+        <div class="done"><b>Docker models</b><code>ddm model pull</code>, Hugging Face, Model Runner checks <em>(in testing)</em></div>
         <div><b>Polish</b>Pause/resume, bandwidth limits, cache cleanup</div>
       </div>
     </section>
@@ -712,15 +782,17 @@ shop-db-1
       handOver();
     }
   }
-  // ---- pass-through example tabs ---------------------------------------------
-  const ptTabs = document.querySelectorAll("#passthrough .term-tabs button");
-  ptTabs.forEach(btn => btn.addEventListener("click", () => {
-    ptTabs.forEach(b => {
-      const on = b === btn;
-      b.setAttribute("aria-selected", String(on));
-      document.getElementById(b.dataset.pane).hidden = !on;
-    });
-  }));
+  // ---- terminal example tabs (each group switches its own panes) -------------
+  document.querySelectorAll(".term-tabs").forEach(group => {
+    const tabs = group.querySelectorAll("button");
+    tabs.forEach(btn => btn.addEventListener("click", () => {
+      tabs.forEach(b => {
+        const on = b === btn;
+        b.setAttribute("aria-selected", String(on));
+        document.getElementById(b.dataset.pane).hidden = !on;
+      });
+    }));
+  });
 
   // Start when the section scrolls into view, so the hand-over is seen from the beginning.
   const chainEl = document.getElementById("chain");

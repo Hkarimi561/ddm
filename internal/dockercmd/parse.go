@@ -14,6 +14,8 @@ const (
 	Pull                    // docker pull: ddm does the pull itself
 	ComposeUp               // docker compose up / create / run: make sure service images exist, then run docker
 	ComposePull             // docker compose pull: ddm pulls the service images itself
+	ModelRun                // docker model run: make sure the model is loaded, then run docker
+	ModelPull               // docker model pull: ddm pulls the model itself
 )
 
 // Image is an image a command needs.
@@ -30,6 +32,7 @@ type Command struct {
 	Kind    Kind
 	Images  []Image  // for Run and Pull
 	Compose *Compose // for ComposeUp and ComposePull
+	Model   string   // for ModelRun and ModelPull
 }
 
 // Compose describes a docker compose command.
@@ -72,6 +75,17 @@ func Parse(args []string) Command {
 		}
 	case "compose":
 		c.Kind, c.Compose = parseCompose(rest)
+	case "model":
+		if len(rest) == 0 {
+			break
+		}
+		kind := map[string]Kind{"run": ModelRun, "pull": ModelPull}[rest[0]]
+		if kind == Other {
+			break
+		}
+		if pos := modelSpec.scan(rest[1:], true, func(string, string) {}); len(pos) > 0 {
+			c.Kind, c.Model = kind, pos[0]
+		}
 	}
 	return c
 }
@@ -183,6 +197,9 @@ var (
 		"-v", "--volume", "-w", "--workdir")
 
 	composePullSpec = values("--policy")
+
+	// docker model run/pull: switches; any other option takes a value.
+	modelSpec = switches([]string{"--detach", "--debug", "--ignore-runtime-memory-check", "--help"}, "d")
 )
 
 // parseRun finds the image of `docker run|create [OPTIONS] IMAGE [COMMAND]`.

@@ -73,7 +73,7 @@ they stopped, even after a reboot.`,
 	pf.StringVar(&g.cacheDir, "cache-dir", "", "blob cache directory (default: $DDM_CACHE_DIR, cache_dir from the config, or the OS cache directory)")
 	pf.StringVar(&g.configPath, "config", "", "config file (default: $DDM_CONFIG or the OS config directory)")
 
-	root.AddCommand(newPullCmd(g), newDockerCmd(g), newDoctorCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g))
+	root.AddCommand(newPullCmd(g), newModelCmd(g), newDockerCmd(g), newDoctorCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g))
 	return root
 }
 

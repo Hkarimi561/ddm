@@ -149,7 +149,7 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 	if len(missing) == 0 {
 		return nil
 	}
-	if err := p.checkSpace(total); err != nil {
+	if err := p.CheckSpace(total); err != nil {
 		return err
 	}
 
@@ -202,10 +202,10 @@ func (e *NoSpaceError) Error() string {
 // spaceMargin is kept free beyond the download itself.
 const spaceMargin = 256 << 20
 
-// checkSpace makes sure the cache's disk can hold another n bytes. Partial
+// CheckSpace makes sure the cache's disk can hold another n bytes. Partial
 // downloads already have their full size reserved, but counting them again
 // errs on the safe side. If free space can't be determined, it doesn't block.
-func (p *Puller) checkSpace(n int64) error {
+func (p *Puller) CheckSpace(n int64) error {
 	free, err := diskspace.Free(p.Cache.Root)
 	if err != nil {
 		if p.Log != nil {

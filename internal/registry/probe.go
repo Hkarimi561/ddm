@@ -56,7 +56,7 @@ func (c *Client) Ping(ctx context.Context, ep Endpoint) (time.Duration, error) {
 func (c *Client) ProbeEndpoint(ctx context.Context, ep Endpoint, ref name.Reference, platform v1.Platform, maxBytes int64, maxTime time.Duration) Probe {
 	pr := Probe{Endpoint: ep}
 	start := time.Now()
-	img, err := c.resolveAt(ctx, ep, ref, platform)
+	img, err := c.resolveAt(ctx, ep, ref, platform, kindImage)
 	pr.Latency = time.Since(start)
 	if err != nil {
 		pr.Err = err

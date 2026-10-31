@@ -18,6 +18,7 @@ import (
 	"github.com/Hkarimi561/ddm/internal/config"
 	"github.com/Hkarimi561/ddm/internal/diskspace"
 	"github.com/Hkarimi561/ddm/internal/docker"
+	"github.com/Hkarimi561/ddm/internal/modelrunner"
 	"github.com/Hkarimi561/ddm/internal/ui"
 )
 
@@ -138,6 +139,9 @@ func runDoctor(ctx context.Context, g *globals) []check {
 			add(pluginCheck(info, "model", statusInfo,
 				"needed for Docker models (`docker model ...`).",
 				"Enable Docker Model Runner in Docker Desktop (Settings > AI), or install the docker-model-plugin package on Linux."))
+			if _, ok := info.Plugin("model"); ok && ierr == nil {
+				add(runnerCheck(ctx, cli, info))
+			}
 		}
 	}
 
@@ -180,6 +184,20 @@ func pluginCheck(info *docker.Info, plugin string, missing checkStatus, why, fix
 		return check{name, statusOK, orDefault(p.Version, "installed"), ""}
 	}
 	return check{name, missing, "not installed: " + why, fix}
+}
+
+func runnerCheck(ctx context.Context, cli *docker.CLI, info *docker.Info) check {
+	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	r, err := modelrunner.Detect(rctx, cli)
+	if err != nil {
+		return check{"model runner", statusWarn, "not running: " + firstLine(err.Error()), modelrunner.EnableHint(modelrunner.IsDesktop(info))}
+	}
+	detail := fmt.Sprintf("reachable via %s (%s)", r.Kind, r.Base)
+	if models, err := r.List(rctx); err == nil {
+		detail += fmt.Sprintf(", %d model(s)", len(models))
+	}
+	return check{"model runner", statusOK, detail, ""}
 }
 
 func composeHint() string {

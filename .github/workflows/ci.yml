@@ -38,15 +38,26 @@ jobs:
             go mod tidy
           fi
       - name: Vet
-        run: go vet ./...
+        run: go vet ./... 2>&1 | tee vet.log
       - name: Test
         run: |
           # The race detector needs cgo, which the Windows runners don't set up.
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            go test ./...
-          else
-            go test -race ./...
-          fi
+          race=-race
+          if [ "$RUNNER_OS" = "Windows" ]; then race=; fi
+          go test $race ./... 2>&1 | tee test.log
+      # Job logs need a GitHub login; the run summary page doesn't.
+      - name: Report failures on the summary page
+        if: failure()
+        run: |
+          for f in vet.log test.log; do
+            [ -s "$f" ] || continue
+            {
+              echo "### $f ($RUNNER_OS)"
+              echo '```'
+              grep -E -v '^(ok|PASS|\?)\s' "$f" | tail -n 200
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
 
   lint-scripts:
     runs-on: ubuntu-latest

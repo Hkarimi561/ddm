@@ -8,7 +8,7 @@ then loads the finished image into your local Docker under its original name.
 Ctrl+C, a dropped Wi-Fi link, a crash or a reboot: run the same command again
 and it continues from the exact byte where it stopped.
 
-> **Status: all five milestones implemented, in testing**: download engine,
+> **Status: v0.5.0 is out**: all five milestones are implemented: download engine,
 > `ddm pull`, mirrors, config, proxies, `ddm docker …` pass-through,
 > `ddm doctor`, Docker Model Runner models, pause/resume/status, bandwidth
 > limits and cache cleanup.

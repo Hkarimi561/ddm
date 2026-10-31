@@ -290,34 +290,42 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 	}
 
 	fmt.Fprintf(p.Out, "Packaging %s for Docker Model Runner\n", ref)
-	tail, err := p.Docker.Stream(ctx, p.Out, append(args, ref.String())...)
-	if err == nil {
-		fmt.Fprintf(p.Out, "Loaded model %s\n", ref)
-		return nil
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if !badReference(tail) {
-		return fmt.Errorf("docker model package failed: %s", lastLine(tail))
-	}
 	// The CLI only accepts lowercase repository names, but Hugging Face
 	// names keep their case. Package under the lowercase name, then add the
 	// exact name through the runner's API.
 	lower := strings.ToLower(ref.Name) + ":" + ref.Tag
-	if tail, err := p.Docker.Stream(ctx, p.Out, append(args, lower)...); err != nil {
-		return fmt.Errorf("docker model package failed: %s", lastLine(tail))
+	if lower != ref.String() {
+		if tail, err := p.Docker.Stream(ctx, p.Out, append(args, lower)...); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return packageError(tail)
+		}
+		if err := p.Runner.Tag(ctx, lower, ref.Name, ref.Tag); err != nil {
+			return fmt.Errorf("the model was loaded as %s, but could not also be named %s: %w", lower, ref, err)
+		}
+		fmt.Fprintf(p.Out, "Loaded model %s\n", ref)
+		return nil
 	}
-	if err := p.Runner.Tag(ctx, lower, ref.Name, ref.Tag); err != nil {
-		return fmt.Errorf("the model was loaded as %s, but could not also be named %s: %w", lower, ref, err)
+	tail, err := p.Docker.Stream(ctx, p.Out, append(args, ref.String())...)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return packageError(tail)
 	}
 	fmt.Fprintf(p.Out, "Loaded model %s\n", ref)
 	return nil
 }
 
-func badReference(stderr string) bool {
-	s := strings.ToLower(stderr)
-	return strings.Contains(s, "invalid reference") || strings.Contains(s, "must be lowercase")
+// packageError explains a failed `docker model package`.
+func packageError(tail string) error {
+	err := fmt.Errorf("docker model package failed: %s", lastLine(tail))
+	if strings.Contains(tail, "missing blob") {
+		return fmt.Errorf("%w\nDocker Model Runner refused the files ddm downloaded (they are verified and kept, so a retry won't download them again). "+
+			"Restart Docker Desktop and run the command again; if `docker model df` also fails, the runner's own store is damaged", err)
+	}
+	return err
 }
 
 func lastLine(s string) string {

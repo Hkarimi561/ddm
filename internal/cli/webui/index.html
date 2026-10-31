@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ddm</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310b981'/%3E%3Cpath d='M16 7v13m0 0-5-5m5 5 5-5M9 25h14' stroke='%23052e1c' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f7f5; --surface: #fff; --surface-2: #eef1ec; --text: #16201a; --muted: #5b675f;
+    --border: #dde3dc; --accent: #0c8f63; --accent-ink: #fff; --warn: #b45309; --danger: #b91c1c;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b0f0d; --surface: #121915; --surface-2: #18211c; --text: #e6eee8; --muted: #94a39a;
+      --border: #24302a; --accent: #34d399; --accent-ink: #052e1c; --warn: #fbbf24; --danger: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--sans); }
+  code, input, select { font-family: var(--mono); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 48px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 16px 0; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 18px; margin-right: auto; }
+  .brand svg { width: 26px; height: 26px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { background: none; border: 1px solid transparent; border-radius: 8px; padding: 6px 12px; color: var(--muted); font: 600 14px var(--sans); cursor: pointer; }
+  nav button[aria-selected="true"] { color: var(--text); background: var(--surface); border-color: var(--border); }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
+  .panel h2 { font-size: 17px; margin: 0 0 4px; }
+  .panel > p.sub { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text], input[type=password], select {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 14px; min-width: 0;
+  }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.btn { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; font: 600 13px var(--sans); cursor: pointer; white-space: nowrap; }
+  button.btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button.icon { padding: 5px 9px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+  .pill.paused { color: var(--warn); border-color: var(--warn); }
+  .pill.ok { color: var(--accent); border-color: var(--accent); }
+  .bar { height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--border); margin: 8px 0; }
+  .bar i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+  .bar.paused i { background: var(--warn); }
+  .run { border-top: 1px solid var(--border); padding: 14px 0; }
+  .run:first-of-type { border-top: 0; padding-top: 4px; }
+  .run .cmd { font-family: var(--mono); font-size: 13.5px; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.mono { font-family: var(--mono); overflow-wrap: anywhere; }
+  .table-wrap { overflow-x: auto; }
+  .setting { display: grid; gap: 6px 14px; grid-template-columns: 1fr; padding: 12px 0; border-top: 1px solid var(--border); }
+  .setting:first-of-type { border-top: 0; }
+  @media (min-width: 720px) { .setting { grid-template-columns: 220px 1fr; align-items: start; } }
+  .setting label { font-family: var(--mono); font-weight: 700; font-size: 14px; }
+  .setting .desc { color: var(--muted); font-size: 13px; }
+  .setting input[type=text] { flex: 1; min-width: 160px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .chips button { border: 1px solid var(--border); background: none; color: var(--muted); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; }
+  .chips button:hover { color: var(--text); border-color: var(--accent); }
+  .mirror-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+  .mirror-list li { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+  .mirror-list li code { flex: 1; overflow-wrap: anywhere; font-size: 13.5px; }
+  .stat { display: inline-block; margin-right: 22px; }
+  .stat b { display: block; font-size: 20px; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+  #toast.show { opacity: 1; }
+  #toast.err { background: var(--danger); color: #fff; }
+  .login { max-width: 360px; margin: 12vh auto 0; }
+  .login input { width: 100%; margin: 10px 0; }
+  .login button { width: 100%; }
+  .error { color: var(--danger); font-size: 14px; min-height: 1.4em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M16 7v13m0 0-5-5m5 5 5-5M9 25h14" stroke="var(--accent-ink)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      ddm <span class="muted small" id="version"></span>
+    </div>
+    <nav id="nav" hidden role="tablist">
+      <button data-tab="downloads" aria-selected="true">Downloads</button>
+      <button data-tab="settings">Settings</button>
+      <button data-tab="mirrors">Mirrors</button>
+      <button data-tab="cache">Cache</button>
+      <button data-tab="account">Account</button>
+    </nav>
+  </header>
+
+  <!-- login -->
+  <form class="panel login" id="login" hidden>
+    <h2>Log in</h2>
+    <p class="muted small">Use the password <code>ddm service install</code> printed, or set one with <code>ddm service password</code>.</p>
+    <input type="password" id="password" autocomplete="current-password" placeholder="Password" required>
+    <div class="error" id="login-error"></div>
+    <button class="btn primary" type="submit">Log in</button>
+  </form>
+
+  <!-- downloads -->
+  <section data-view="downloads" hidden>
+    <div class="panel">
+      <div class="row" style="justify-content: space-between">
+        <div><h2>Running downloads</h2><p class="muted small" style="margin:0">Updates every second.</p></div>
+        <div class="row">
+          <button class="btn" id="pause-all">Pause all</button>
+          <button class="btn" id="resume-all">Resume all</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 12px">
+        <span class="muted small">Speed limit for all running downloads:</span>
+        <input type="text" id="limit-all" placeholder="2MiB, or 0 for none" style="width: 200px">
+        <button class="btn" id="limit-all-btn">Apply</button>
+      </div>
+      <div id="runs" style="margin-top: 10px"></div>
+    </div>
+    <div class="panel" id="partials-panel" hidden>
+      <h2>Unfinished downloads</h2>
+      <p class="sub">Kept in the cache; they continue when the same image or model is pulled again.</p>
+      <div id="partials"></div>
+    </div>
+  </section>
+
+  <!-- settings -->
+  <section data-view="settings" hidden>
+    <div class="panel">
+      <h2>Settings</h2>
+      <p class="sub">Saved to <code id="config-path"></code>. New downloads use them; the bandwidth limit also applies to running ones.</p>
+      <div id="settings"></div>
+    </div>
+  </section>
+
+  <!-- mirrors -->
+  <section data-view="mirrors" hidden>
+    <div class="panel">
+      <h2>Mirrors</h2>
+      <p class="sub">Tried in order before the registry itself. ddm switches to the next one when a mirror keeps failing, lacks a file, or is slower than <code>min_speed</code>, and continues where it left off.</p>
+      <div id="mirrors"></div>
+      <div class="row" style="margin-top: 14px">
+        <input type="text" id="new-registry" placeholder="registry, e.g. ghcr.io" style="width: 220px">
+        <button class="btn" id="add-registry">Add registry</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- cache -->
+  <section data-view="cache" hidden>
+    <div class="panel">
+      <h2>Cache</h2>
+      <p class="sub" id="cache-root"></p>
+      <div id="cache-stats"></div>
+      <div class="row" style="margin-top: 14px">
+        <select id="gc-age">
+          <option value="">Only unused files</option>
+          <option value="7d">…and anything unused for 7 days</option>
+          <option value="30d">…and anything unused for 30 days</option>
+          <option value="90d">…and anything unused for 90 days</option>
+        </select>
+        <button class="btn" id="gc-preview">Preview</button>
+        <button class="btn primary" id="gc-run">Clean up</button>
+        <button class="btn danger" id="gc-all">Empty cache</button>
+      </div>
+      <p class="muted small" id="gc-result"></p>
+    </div>
+    <div class="panel">
+      <h2>Cached images and models</h2>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Kind</th><th>Size</th><th>Last used</th></tr></thead><tbody id="refs"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- account -->
+  <section data-view="account" hidden>
+    <form class="panel" id="password-form">
+      <h2>Change password</h2>
+      <p class="sub">Other browsers are logged out. At least 8 characters.</p>
+      <div class="row" style="flex-direction: column; align-items: stretch; max-width: 360px">
+        <input type="password" id="pw-current" placeholder="Current password" autocomplete="current-password" required>
+        <input type="password" id="pw-new" placeholder="New password" autocomplete="new-password" minlength="8" required>
+        <input type="password" id="pw-repeat" placeholder="Repeat new password" autocomplete="new-password" minlength="8" required>
+        <button class="btn primary" type="submit">Change password</button>
+      </div>
+    </form>
+    <div class="panel">
+      <h2>Session</h2>
+      <p class="sub">The web UI runs in the background (<code>ddm service status</code>) and listens on the <code>ui_address</code> setting.</p>
+      <button class="btn" id="logout">Log out</button>
+    </div>
+  </section>
+</div>
+<div id="toast" role="status"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const bytes = n => {
+    if (!n) return "0 B";
+    const u = ["B", "KiB", "MiB", "GiB", "TiB"]; let i = 0; n = Number(n);
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i ? n.toFixed(1) : n) + " " + u[i];
+  };
+  const dur = s => {
+    s = Math.round(s); if (!isFinite(s) || s <= 0) return "";
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+    return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+  };
+  const ago = t => {
+    const d = (Date.now() - new Date(t)) / 1000;
+    if (d < 60) return "just now";
+    if (d < 3600) return Math.floor(d / 60) + " min ago";
+    if (d < 172800) return Math.floor(d / 3600) + " h ago";
+    return Math.floor(d / 86400) + " days ago";
+  };
+  let toastTimer;
+  const toast = (msg, err) => {
+    const t = $("toast"); t.textContent = msg; t.className = "show" + (err ? " err" : "");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.className = ""), 2600);
+  };
+
+  async function api(method, path, body) {
+    const r = await fetch(path, {
+      method, credentials: "same-origin",
+      headers: { "X-DDM": "1", "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data = {};
+    try { data = await r.json(); } catch {}
+    if (r.status === 401 && path !== "/api/login") { showLogin(); throw new Error("Please log in"); }
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  }
+  const act = fn => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, true); } };
+
+  // ---- navigation ---------------------------------------------------------
+  let current = "downloads";
+  function show(tab) {
+    current = tab;
+    document.querySelectorAll("#nav button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+    document.querySelectorAll("[data-view]").forEach(v => (v.hidden = v.dataset.view !== tab));
+    ({ downloads: loadStatus, settings: loadConfig, mirrors: loadConfig, cache: loadCache })[tab]?.();
+    try { localStorage.setItem("ddm-tab", tab); } catch {}
+  }
+  document.querySelectorAll("#nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
+
+  function showLogin() {
+    $("nav").hidden = true;
+    document.querySelectorAll("[data-view]").forEach(v => (v.hidden = true));
+    $("login").hidden = false;
+    $("password").focus();
+  }
+  function showApp(me) {
+    $("version").textContent = me.version ? me.version : "";
+    $("login").hidden = true;
+    $("nav").hidden = false;
+    let tab = "downloads";
+    try { tab = localStorage.getItem("ddm-tab") || tab; } catch {}
+    show(tab);
+  }
+  $("login").addEventListener("submit", async e => {
+    e.preventDefault();
+    $("login-error").textContent = "";
+    try {
+      const me = await api("POST", "/api/login", { password: $("password").value });
+      $("password").value = "";
+      showApp(me);
+    } catch (err) { $("login-error").textContent = err.message; }
+  });
+
+  // ---- downloads ----------------------------------------------------------
+  async function loadStatus() {
+    const s = await api("GET", "/api/status");
+    const runs = s.runs || [];
+    $("runs").innerHTML = runs.length ? runs.map(r => {
+      const pct = r.total ? 100 * r.done / r.total : 0;
+      const eta = !r.paused && r.bytes_per_sec > 0 ? dur((r.total - r.done) / r.bytes_per_sec) : "";
+      const items = (r.items || []).map(it => `<tr><td class="mono">${esc(it.name)}</td><td>${bytes(it.done)} / ${bytes(it.size)}</td>
+        <td>${esc(it.state)}</td><td class="mono muted">${it.state === "downloading" && it.source ? esc(it.source) : ""}</td></tr>`).join("");
+      return `<div class="run">
+        <div class="row" style="justify-content: space-between">
+          <div class="cmd">${esc(r.command)} <span class="muted">· PID ${r.pid}</span></div>
+          <span class="pill ${r.paused ? "paused" : "ok"}">${r.paused ? "paused" : "downloading"}</span>
+        </div>
+        <div class="bar ${r.paused ? "paused" : ""}"><i style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="row small" style="justify-content: space-between">
+          <span>${bytes(r.done)} / ${bytes(r.total)} (${pct.toFixed(0)}%)${!r.paused && r.bytes_per_sec ? ` · ${bytes(r.bytes_per_sec)}/s` : ""}${eta ? ` · ${eta} left` : ""}${r.rate_limit ? ` · limit ${bytes(r.rate_limit)}/s` : ""}</span>
+          <span class="row">
+            <button class="btn icon" data-act="${r.paused ? "resume" : "pause"}" data-pid="${r.pid}">${r.paused ? "Resume" : "Pause"}</button>
+            <input type="text" placeholder="1MiB" title="Speed limit for this download (0 = none)" data-limit="${r.pid}" style="width: 90px">
+            <button class="btn icon" data-act="limit" data-pid="${r.pid}">Set</button>
+          </span>
+        </div>
+        ${items ? `<div class="table-wrap"><table>${items}</table></div>` : ""}
+      </div>`;
+    }).join("") : `<p class="muted">Nothing is downloading. Start with <code>ddm pull IMAGE</code>, <code>ddm model pull MODEL</code> or a <code>ddm docker …</code> command.</p>`;
+    const idle = (s.partials || []).filter(p => !p.active);
+    $("partials-panel").hidden = !idle.length;
+    $("partials").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Blob</th><th>Done</th></tr></thead>${idle.map(p =>
+      `<tr><td class="mono">${esc(p.digest.slice(7, 19))}</td><td>${bytes(p.done)} / ${bytes(p.size)}</td></tr>`).join("")}</table></div>`;
+  }
+  $("runs").addEventListener("click", act(async e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const pid = Number(b.dataset.pid), a = b.dataset.act;
+    if (a === "limit") {
+      const rate = document.querySelector(`input[data-limit="${pid}"]`).value.trim();
+      await api("POST", "/api/limit", { pid, rate: rate || "0" });
+      toast(rate && rate !== "0" ? `Limited to ${rate}/s` : "Speed limit removed");
+    } else {
+      await api("POST", "/api/" + a, { pid });
+      toast(a === "pause" ? "Pausing…" : "Resuming…");
+    }
+    setTimeout(loadStatus, 1200);
+  }));
+  $("pause-all").addEventListener("click", act(async () => {
+    const r = await api("POST", "/api/pause", { pid: 0 }); toast(r.pids.length ? "Pausing all downloads…" : "Nothing to pause");
+  }));
+  $("resume-all").addEventListener("click", act(async () => {
+    const r = await api("POST", "/api/resume", { pid: 0 }); toast(r.pids.length ? "Resuming…" : "Nothing to resume");
+  }));
+  $("limit-all-btn").addEventListener("click", act(async () => {
+    const rate = $("limit-all").value.trim() || "0";
+    const r = await api("POST", "/api/limit", { pid: 0, rate });
+    toast(r.pids.length ? (rate === "0" ? "Speed limit removed" : `Limited to ${rate}/s`) : "Nothing is downloading");
+  }));
+  setInterval(() => { if (current === "downloads" && !$("nav").hidden && document.visibilityState === "visible") loadStatus().catch(() => {}); }, 1000);
+
+  // ---- settings -----------------------------------------------------------
+  const presets = {
+    bandwidth_limit: ["0", "512KiB", "1MiB", "2MiB", "5MiB", "10MiB"],
+    connections: ["2", "4", "8", "16"],
+    min_speed: ["0", "32KiB", "64KiB", "256KiB"],
+    stall_timeout: ["15s", "30s", "1m", "2m"],
+    ui_address: ["127.0.0.1:7878", "0.0.0.0:7878"],
+  };
+  let config = { settings: [], mirrors: {} };
+  async function loadConfig() {
+    config = await api("GET", "/api/config");
+    $("config-path").textContent = config.path;
+    $("settings").innerHTML = config.settings.map(s => `<div class="setting">
+      <div><label for="set-${s.key}">${esc(s.key)}</label><div class="desc">${esc(s.description)}</div></div>
+      <div>
+        <div class="row">
+          <input type="text" id="set-${s.key}" value="${esc(s.value)}" placeholder="${esc(s.default || "(none)")}">
+          <button class="btn primary" data-save="${s.key}">Save</button>
+          <button class="btn" data-reset="${s.key}" title="Default: ${esc(s.default || "(none)")}">Default</button>
+        </div>
+        ${presets[s.key] ? `<div class="chips">${presets[s.key].map(p => `<button data-preset="${s.key}" data-value="${p}">${p === "0" ? "0 (off)" : p}</button>`).join("")}</div>` : ""}
+      </div></div>`).join("");
+    renderMirrors();
+  }
+  async function save(key, value) {
+    const r = await api("POST", "/api/config", { key, value });
+    $("set-" + key).value = r.value;
+    toast(`${key} = ${r.value || "(none)"}` + (key === "ui_address" ? " (restart the web UI to apply)" : ""));
+  }
+  $("settings").addEventListener("click", act(async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.save) await save(b.dataset.save, $("set-" + b.dataset.save).value.trim());
+    if (b.dataset.preset) { $("set-" + b.dataset.preset).value = b.dataset.value; await save(b.dataset.preset, b.dataset.value); }
+    if (b.dataset.reset) {
+      const r = await api("POST", "/api/config/unset", { key: b.dataset.reset });
+      $("set-" + b.dataset.reset).value = r.value; toast(`${r.key} reset to ${r.value || "(none)"}`);
+    }
+  }));
+  $("settings").addEventListener("keydown", act(async e => {
+    if (e.key === "Enter" && e.target.id?.startsWith("set-")) await save(e.target.id.slice(4), e.target.value.trim());
+  }));
+
+  // ---- mirrors ------------------------------------------------------------
+  function renderMirrors() {
+    const regs = { ...config.mirrors };
+    for (const r of ["docker.io", "hf.co"]) if (!Object.keys(regs).some(k => k === r || (r === "hf.co" && k === "huggingface.co"))) regs[r] = [];
+    $("mirrors").innerHTML = Object.entries(regs).map(([reg, urls]) => `<div class="panel" style="background: var(--bg); margin: 12px 0 0">
+      <div class="row" style="justify-content: space-between"><b class="mono">${esc(reg)}</b><span class="muted small">${urls.length ? "" : "no mirrors: only the registry itself is used"}</span></div>
+      <ol class="mirror-list">${urls.map((u, i) => `<li><code>${i + 1}. ${esc(u)}</code>
+        <button class="btn icon" data-reg="${esc(reg)}" data-i="${i}" data-op="up" ${i ? "" : "disabled"} title="Try earlier">↑</button>
+        <button class="btn icon" data-reg="${esc(reg)}" data-i="${i}" data-op="down" ${i < urls.length - 1 ? "" : "disabled"} title="Try later">↓</button>
+        <button class="btn icon danger" data-reg="${esc(reg)}" data-i="${i}" data-op="rm" title="Remove">✕</button></li>`).join("")}</ol>
+      <div class="row"><input type="text" placeholder="https://mirror.example.com" data-new="${esc(reg)}" style="flex: 1; min-width: 200px">
+        <button class="btn" data-reg="${esc(reg)}" data-op="add">Add mirror</button></div>
+    </div>`).join("");
+  }
+  async function saveMirrors(reg, urls) {
+    const r = await api("PUT", "/api/mirrors", { registry: reg, urls });
+    config.mirrors = r.mirrors || {};
+    renderMirrors();
+  }
+  $("mirrors").addEventListener("click", act(async e => {
+    const b = e.target.closest("button[data-op]"); if (!b) return;
+    const reg = b.dataset.reg, urls = [...(config.mirrors[reg] || [])], i = Number(b.dataset.i);
+    if (b.dataset.op === "add") {
+      const input = document.querySelector(`input[data-new="${CSS.escape(reg)}"]`);
+      const u = input.value.trim(); if (!u) return;
+      urls.push(u); await saveMirrors(reg, urls); toast(`Added ${u}`);
+      return;
+    }
+    if (b.dataset.op === "rm") urls.splice(i, 1);
+    if (b.dataset.op === "up") [urls[i - 1], urls[i]] = [urls[i], urls[i - 1]];
+    if (b.dataset.op === "down") [urls[i + 1], urls[i]] = [urls[i], urls[i + 1]];
+    await saveMirrors(reg, urls); toast("Mirrors saved");
+  }));
+  $("add-registry").addEventListener("click", () => {
+    const reg = $("new-registry").value.trim(); if (!reg) return;
+    if (!config.mirrors[reg]) config.mirrors[reg] = [];
+    $("new-registry").value = ""; renderMirrors();
+  });
+
+  // ---- cache --------------------------------------------------------------
+  async function loadCache() {
+    const c = await api("GET", "/api/cache");
+    $("cache-root").innerHTML = `Stored in <code>${esc(c.root)}</code>.`;
+    $("cache-stats").innerHTML = `<span class="stat"><b>${bytes(c.bytes)}</b><span class="muted small">${c.blobs} files</span></span>
+      <span class="stat"><b>${bytes(c.unreferenced_bytes)}</b><span class="muted small">not used by anything</span></span>
+      <span class="stat"><b>${bytes(c.partial_bytes)}</b><span class="muted small">${c.partials} unfinished</span></span>`;
+    $("refs").innerHTML = c.refs.length ? c.refs.map(r => `<tr><td class="mono">${esc(r.name)}</td><td>${esc(r.kind)}</td><td>${bytes(r.size)}</td><td>${ago(r.used)}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="muted">Nothing cached yet.</td></tr>`;
+  }
+  async function gc(opts) {
+    const r = await api("POST", "/api/cache/gc", opts);
+    const what = `${bytes(r.bytes)}: ${r.blobs} file(s), ${r.partials} unfinished download(s)` + (r.refs.length ? `, forgetting ${r.refs.join(", ")}` : "");
+    $("gc-result").textContent = (opts.dry_run ? "Would free " : "Freed ") + what + ".";
+    if (!opts.dry_run) loadCache();
+  }
+  $("gc-preview").addEventListener("click", act(() => gc({ older_than: $("gc-age").value, dry_run: true })));
+  $("gc-run").addEventListener("click", act(() => gc({ older_than: $("gc-age").value })));
+  $("gc-all").addEventListener("click", act(async () => {
+    if (confirm("Delete everything in the ddm cache? Running downloads are kept; images and models already in Docker stay there.")) await gc({ all: true });
+  }));
+
+  // ---- account ------------------------------------------------------------
+  $("password-form").addEventListener("submit", act(async e => {
+    e.preventDefault();
+    if ($("pw-new").value !== $("pw-repeat").value) throw new Error("The new passwords don't match");
+    await api("POST", "/api/password", { current: $("pw-current").value, new: $("pw-new").value });
+    e.target.reset(); toast("Password changed");
+  }));
+  $("logout").addEventListener("click", act(async () => { await api("POST", "/api/logout", {}); showLogin(); }));
+
+  // ---- start --------------------------------------------------------------
+  api("GET", "/api/me").then(showApp).catch(showLogin);
+})();
+</script>
+</body>
+</html>

@@ -100,6 +100,43 @@ ddm docker model run ai/gemma3 "Hello"      # pass-through: fetch if missing, th
 
 Design notes: [docs/model-runner-research.md](docs/model-runner-research.md).
 
+## Web UI
+
+The installers start a small settings page that runs in the background and
+starts again at every login. Open **http://127.0.0.1:7878** and log in with
+the password the installer printed. From there you can:
+
+- change every setting: bandwidth limit, connections, retries, stall
+  timeout, minimum mirror speed, proxy, cache folder
+- add, remove and reorder mirrors for each registry (Docker Hub, Hugging
+  Face, ...)
+- watch running downloads, pause and resume them, and change their speed
+  limit on the fly
+- see what's in the cache and clean it up
+- change the password
+
+```sh
+ddm service status         # is it installed and running?
+ddm service password       # set a new password (or --generate one)
+ddm service install        # (re)start it now and at every login
+ddm service uninstall      # stop it and remove it from login
+ddm config set ui_address 0.0.0.0:7878   # reach it from other machines (password required)
+```
+
+- **How it starts at login:** a systemd user service on Linux, a
+  LaunchAgent on macOS, and a hidden autostart entry for your user on
+  Windows. On Linux without systemd, `ddm service install` starts it for
+  the current session only. `ddm serve` runs it in the foreground.
+- **Security:**
+  - The password is stored as a bcrypt hash next to the config file,
+    readable only by you.
+  - Sessions use an HttpOnly, SameSite=Strict cookie, and repeated wrong
+    passwords are slowed down.
+  - Changing the password logs every other browser out.
+  - The page is plain HTTP. If you open it to your network with
+    `ui_address`, use it only on networks you trust.
+- **Skipping it:** install with `DDM_NO_SERVICE=1` to leave the web UI out.
+
 ## Stay in control
 
 ```sh

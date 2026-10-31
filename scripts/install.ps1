@@ -10,6 +10,7 @@
 #                       (a URL or a local folder)
 #   DDM_ARCH            override architecture detection (amd64 or arm64)
 #   DDM_NO_MODIFY_PATH  set to 1 to leave the user PATH alone
+#   DDM_NO_SERVICE      set to 1 to skip starting the web UI at login
 #
 # Works in Windows PowerShell 5.1 and PowerShell 7. Everything runs inside a
 # script block so nothing leaks into the session that ran `iex`, and errors
@@ -111,6 +112,13 @@
         if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
             Write-Host ""
             Write-Host "Note: ddm needs Docker to load images: https://docs.docker.com/desktop/setup/install/windows-install/"
+        }
+        if ($env:DDM_NO_SERVICE -ne '1') {
+            # Starts the settings web UI now and at every login, and prints its
+            # address and password.
+            Write-Host ""
+            & $target service install
+            if ($LASTEXITCODE -ne 0) { Write-Host "The web UI could not be set up; start it with: ddm serve" }
         }
         Write-Host ""
         Write-Host "Get started:  ddm pull nginx:latest"

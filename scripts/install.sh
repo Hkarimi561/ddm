@@ -11,6 +11,7 @@
 #   DDM_BASE_URL     download archives from here instead of GitHub Releases
 #                    (any URL curl understands, including file://)
 #   DDM_OS, DDM_ARCH override platform detection
+#   DDM_NO_SERVICE   set to 1 to skip starting the web UI service
 #
 # Everything lives inside main(), so a download cut off half-way through
 # never runs a partial script.
@@ -85,6 +86,12 @@ main() {
   if ! command -v docker >/dev/null 2>&1; then
     say ""
     say "Note: ddm needs Docker to load images: https://docs.docker.com/get-docker/"
+  fi
+  if [ "${DDM_NO_SERVICE:-}" != "1" ]; then
+    say ""
+    # Starts the settings web UI now and at every login, and prints its
+    # address and password.
+    "$dir/ddm" service install || say "The web UI could not be set up; start it with: ddm serve"
   fi
   say ""
   say "Get started:  ddm pull nginx:latest"

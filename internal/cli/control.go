@@ -41,31 +41,9 @@ func newStatusCmd(g *globals) *cobra.Command {
 		Short: "Show running downloads and unfinished ones that can be resumed",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, d, err := g.runDir()
+			runs, partials, err := g.collectStatus()
 			if err != nil {
 				return err
-			}
-			runs, err := d.List()
-			if err != nil {
-				return err
-			}
-			active := map[string]bool{}
-			for _, r := range runs {
-				for _, it := range r.Items {
-					if it.State == "downloading" {
-						active[it.Digest] = true
-					}
-				}
-			}
-			var partials []partialJSON
-			if ps, err := c.Partials(); err == nil {
-				for _, p := range ps {
-					done, size, _, err := engine.ReadProgress(p.Paths.State)
-					if err != nil {
-						size = p.Size
-					}
-					partials = append(partials, partialJSON{Digest: p.Digest, Done: done, Size: size, Active: active[p.Digest]})
-				}
 			}
 			if asJSON {
 				return printJSON(map[string]any{"runs": runs, "partials": partials})
@@ -76,6 +54,40 @@ func newStatusCmd(g *globals) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
+}
+
+// collectStatus gathers running downloads and unfinished ones in the cache.
+func (g *globals) collectStatus() ([]runstate.Status, []partialJSON, error) {
+	c, d, err := g.runDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	runs, err := d.List()
+	if err != nil {
+		return nil, nil, err
+	}
+	active := map[string]bool{}
+	for _, r := range runs {
+		for _, it := range r.Items {
+			if it.State == "downloading" {
+				active[it.Digest] = true
+			}
+		}
+	}
+	partials := []partialJSON{}
+	if ps, err := c.Partials(); err == nil {
+		for _, p := range ps {
+			done, size, _, err := engine.ReadProgress(p.Paths.State)
+			if err != nil {
+				size = p.Size
+			}
+			partials = append(partials, partialJSON{Digest: p.Digest, Done: done, Size: size, Active: active[p.Digest]})
+		}
+	}
+	if runs == nil {
+		runs = []runstate.Status{}
+	}
+	return runs, partials, nil
 }
 
 func printStatus(runs []runstate.Status, partials []partialJSON) {

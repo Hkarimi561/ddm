@@ -218,10 +218,17 @@ func ago(t time.Time) string {
 	case d < time.Minute:
 		return "just now"
 	case d < time.Hour:
-		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+		return plural(int(d.Minutes()), "minute") + " ago"
 	case d < 48*time.Hour:
-		return fmt.Sprintf("%d hours ago", int(d.Hours()))
+		return plural(int(d.Hours()), "hour") + " ago"
 	default:
-		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+		return plural(int(d.Hours()/24), "day") + " ago"
 	}
+}
+
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
 }

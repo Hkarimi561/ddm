@@ -2,3 +2,7 @@
 # or `curl ... | bash` breaks on the stray carriage returns.
 *.sh text eol=lf
 *.ps1 text eol=crlf
+
+# go mod tidy -diff in CI fails if these get CRLF on Windows runners.
+go.mod text eol=lf
+go.sum text eol=lf

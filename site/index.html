@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ddm: Docker pulls that survive bad networks</title>
+<meta name="description" content="ddm downloads Docker images over parallel, resumable connections, verifies every byte, and loads them into Docker. Interrupted pulls continue from the exact byte where they stopped.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310b981'/%3E%3Cpath d='M16 7v13m0 0-5-5m5 5 5-5M9 25h14' stroke='%23052e1c' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f7f8f6;
+    --surface: #ffffff;
+    --surface-2: #eef1ec;
+    --text: #16201a;
+    --muted: #5b675f;
+    --border: #dde3dc;
+    --accent: #0c8f63;
+    --accent-ink: #ffffff;
+    --term-bg: #0f1512;
+    --term-text: #d6e2da;
+    --term-dim: #7d8c83;
+    --term-green: #4ade80;
+    --term-amber: #fbbf24;
+    --term-red: #f87171;
+    --term-blue: #7dd3fc;
+    --shadow: 0 1px 2px rgba(16, 24, 20, .06), 0 12px 32px -12px rgba(16, 24, 20, .18);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0f0d;
+      --surface: #121915;
+      --surface-2: #18211c;
+      --text: #e6eee8;
+      --muted: #94a39a;
+      --border: #24302a;
+      --accent: #34d399;
+      --accent-ink: #052e1c;
+      --term-bg: #070a08;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 40px -16px rgba(0, 0, 0, .7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0f0d;
+    --surface: #121915;
+    --surface-2: #18211c;
+    --text: #e6eee8;
+    --muted: #94a39a;
+    --border: #24302a;
+    --accent: #34d399;
+    --accent-ink: #052e1c;
+    --term-bg: #070a08;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 40px -16px rgba(0, 0, 0, .7);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 var(--sans);
+  }
+  a { color: var(--accent); }
+  code, kbd, pre { font-family: var(--mono); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+  .brand svg { width: 28px; height: 28px; }
+  nav.links { display: flex; gap: 18px; align-items: center; font-size: 15px; }
+  nav.links a { color: var(--muted); text-decoration: none; }
+  nav.links a:hover { color: var(--text); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 12px; font-size: 13px; color: var(--muted); background: var(--surface);
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+  .hero { padding: 56px 0 24px; display: grid; gap: 40px; }
+  .hero > * { min-width: 0; } /* let the long install command scroll instead of widening the page */
+  .hero-text { max-width: 720px; }
+  .hero .install { max-width: 640px; }
+  h1 { font-size: clamp(34px, 6vw, 54px); line-height: 1.05; letter-spacing: -0.03em; margin: 16px 0 18px; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 18px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
+
+  .install { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tabs button {
+    flex: 1; background: none; border: 0; padding: 11px 12px; cursor: pointer;
+    font: 600 14px var(--sans); color: var(--muted); border-bottom: 2px solid transparent;
+  }
+  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  .cmd { display: flex; align-items: center; gap: 10px; padding: 14px 14px 14px 16px; }
+  .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 14px; scrollbar-width: thin; }
+  .cmd code .p { color: var(--muted); user-select: none; }
+  .copy {
+    flex: none; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    border-radius: 8px; padding: 6px 12px; font: 600 13px var(--sans); cursor: pointer;
+  }
+  .copy:hover { border-color: var(--accent); }
+  .install small { display: block; padding: 0 16px 14px; color: var(--muted); font-size: 13px; }
+
+  .term { background: var(--term-bg); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; border: 1px solid #1d2622; }
+  .term-bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; background: #111814; border-bottom: 1px solid #1d2622; }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: #2a3530; }
+  .term-bar span { margin-left: 8px; font: 12px var(--mono); color: var(--term-dim); }
+  .term pre {
+    margin: 0; padding: 16px 18px; min-height: 360px; color: var(--term-text);
+    font-size: 12.5px; line-height: 1.55; overflow-x: auto; white-space: pre;
+  }
+  @media (min-width: 560px) { .term pre { font-size: 13.5px; } }
+  .t-dim { color: var(--term-dim); } .t-g { color: var(--term-green); } .t-a { color: var(--term-amber); }
+  .t-r { color: var(--term-red); } .t-b { color: var(--term-blue); } .t-bold { font-weight: 700; color: #fff; }
+  .caret { display: inline-block; width: .6em; background: var(--term-text); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  section { padding: 56px 0; }
+  h2 { font-size: clamp(26px, 4vw, 34px); letter-spacing: -0.02em; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 32px; max-width: 40em; }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+  .card h3 { margin: 12px 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); color: var(--accent); }
+  .icon svg { width: 20px; height: 20px; }
+
+  ol.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; counter-reset: s; }
+  ol.steps li {
+    counter-increment: s; display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+  }
+  ol.steps li::before {
+    content: counter(s); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 14px;
+  }
+  ol.steps b { display: block; margin-bottom: 2px; }
+  ol.steps span { color: var(--muted); font-size: 15px; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--surface-2); }
+  td code { font-size: 13.5px; white-space: nowrap; }
+
+  .roadmap { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .roadmap div { border: 1px dashed var(--border); border-radius: 12px; padding: 14px 16px; color: var(--muted); font-size: 15px; }
+  .roadmap b { color: var(--text); display: block; }
+  .roadmap .done { border-style: solid; border-color: var(--accent); }
+
+  footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--border); margin-top: 24px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+
+  @media (max-width: 560px) {
+    nav.links a.hide-sm { display: none; }
+    .hero { padding-top: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M16 7v13m0 0-5-5m5 5 5-5M9 25h14" stroke="var(--accent-ink)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      ddm
+    </a>
+    <nav class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#usage">Usage</a>
+      <a id="gh-link" href="#">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div class="hero-text">
+        <span class="pill"><span class="dot"></span><span id="version-pill">Docker download manager</span></span>
+        <h1>Docker pulls that <em>survive</em> bad networks.</h1>
+        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped.</p>
+
+        <div class="install" id="install">
+          <div class="tabs" role="tablist">
+            <button role="tab" aria-selected="true" data-os="unix">macOS / Linux</button>
+            <button role="tab" aria-selected="false" data-os="win">Windows</button>
+          </div>
+          <div class="cmd">
+            <code id="install-cmd"></code>
+            <button class="copy" id="copy-btn" type="button">Copy</button>
+          </div>
+          <small id="install-note"></small>
+        </div>
+      </div>
+
+      <div class="term" aria-label="Animated demo of ddm resuming an interrupted pull">
+        <div class="term-bar"><i></i><i></i><i></i><span>~ — bash</span></div>
+        <pre id="term"></pre>
+      </div>
+    </div>
+
+    <section id="features">
+      <h2>Built for unreliable connections</h2>
+      <p class="sub">Docker's own puller starts layers over when the connection breaks. ddm talks to the registry itself and treats every byte it already has as kept.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+          <h3>Resumes to the byte</h3>
+          <p>Progress is saved every second and on exit. Ctrl+C, a crash or a reboot all pick up where they left off.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+          <h3>Parallel segments</h3>
+          <p>Each blob is fetched over several HTTP Range connections, each on its own TCP stream, with redirects to CDNs followed.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+          <h3>Verified, chunk by chunk</h3>
+          <p>Every blob must match its sha256. If data rots on disk, only the damaged chunks are downloaded again.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/><path d="M2 9a15 15 0 0 1 20 0"/></svg></div>
+          <h3>Never gives up</h3>
+          <p>Retries forever with backoff and jitter, and replaces stalled connections. When the network returns, the download carries on.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div>
+          <h3>Atomic import</h3>
+          <p>The finished image is streamed into <code>docker load</code>. Docker registers it only when everything has arrived, so it never ends up half-imported.</p>
+        </div>
+        <div class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+          <h3>One static binary</h3>
+          <p>Linux, macOS and Windows on amd64 and arm64. Docker is the only other thing it needs, and it reuses your <code>docker login</code> credentials.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <p class="sub">ddm skips Docker's downloader and only hands Docker the finished result. No network is involved in that last step.</p>
+      <ol class="steps">
+        <li><div><b>Resolve</b><span>Fetch the manifest and pick the entry for your Docker engine's platform from multi-arch images.</span></div></li>
+        <li><div><b>Skip what you have</b><span>Images already in Docker and blobs already in the ddm cache are not downloaded again, so shared base layers come down once.</span></div></li>
+        <li><div><b>Download in segments</b><span>Blobs are split into chunks and pulled in parallel. Offsets and running hashes are written to disk continuously.</span></div></li>
+        <li><div><b>Verify</b><span>Each blob is checked against its sha256. Corrupt chunks are found and fetched again on their own.</span></div></li>
+        <li><div><b>Load into Docker</b><span>The verified image goes into <code>docker load</code> under its original name, as if it had been pulled normally.</span></div></li>
+      </ol>
+    </section>
+
+    <section id="usage">
+      <h2>Usage</h2>
+      <p class="sub">The same command starts a download and resumes it.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>ddm pull nginx:latest</code></td><td>Download, verify and load into Docker</td></tr>
+            <tr><td><code>ddm pull --platform linux/arm64 IMAGE</code></td><td>Pull a specific platform from a multi-arch image</td></tr>
+            <tr><td><code>ddm pull -c 8 IMAGE</code></td><td>Use 8 connections per blob (default 4)</td></tr>
+            <tr><td><code>ddm pull -p 5 IMAGE</code></td><td>Download 5 blobs at once (default 3)</td></tr>
+            <tr><td><code>ddm pull --no-load IMAGE</code></td><td>Only download into the cache, e.g. while Docker is stopped</td></tr>
+            <tr><td><code>ddm pull --stall-timeout 1m IMAGE</code></td><td>Replace a connection after it has sent nothing for a minute</td></tr>
+            <tr><td><code>ddm pull --verbose IMAGE</code></td><td>Show every retry and its cause</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <h2>Roadmap</h2>
+      <p class="sub">ddm is being built in milestones.</p>
+      <div class="roadmap">
+        <div class="done"><b>Resumable engine</b><code>ddm pull</code> and the Docker import</div>
+        <div><b>Mirrors</b>Per-registry mirrors with automatic fallback and <code>ddm mirror test</code></div>
+        <div><b>Pass-through</b><code>ddm docker run …</code> fetches what a command needs, then runs it</div>
+        <div><b>Docker models</b><code>ddm model pull</code> for Docker Model Runner</div>
+        <div><b>Polish</b>Pause/resume, bandwidth limits, cache cleanup</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>ddm · resumable downloads for Docker</span>
+    <span><a id="gh-link-2" href="#">Source</a> · <a id="releases-link" href="#">Releases</a></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // The Pages workflow replaces __DDM_REPO__ with "owner/name". Before that
+  // (e.g. opening this file locally), fall back to the github.io address.
+  let repo = "__DDM_REPO__";
+  if (repo.startsWith("__")) {
+    const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+    const first = location.pathname.split("/").filter(Boolean)[0];
+    repo = m && first ? `${m[1]}/${first}` : "Hkarimi561/ddm";
+  }
+  const [owner, name] = repo.split("/");
+  const gh = `https://github.com/${repo}`;
+  for (const id of ["gh-link", "gh-link-2"]) document.getElementById(id).href = gh;
+  document.getElementById("releases-link").href = `${gh}/releases`;
+
+  // Installers are published next to this page.
+  let base = location.protocol.startsWith("http")
+    ? location.origin + location.pathname.replace(/[^/]*$/, "")
+    : `https://${owner}.github.io/${name}/`;
+  const commands = {
+    unix: { prompt: "$ ", text: `curl -fsSL ${base}install.sh | bash`,
+            note: "Installs to ~/.local/bin (or /usr/local/bin as root) and checks the sha256 of the download." },
+    win:  { prompt: "PS> ", text: `powershell -c "irm ${base}install.ps1 | iex"`,
+            note: "Installs to %LOCALAPPDATA%\\Programs\\ddm, adds it to your user PATH and checks the sha256 of the download." },
+  };
+  const cmdEl = document.getElementById("install-cmd");
+  const noteEl = document.getElementById("install-note");
+  const tabs = document.querySelectorAll(".tabs button");
+  let current = /Windows/i.test(navigator.userAgent) ? "win" : "unix";
+  function show(os) {
+    current = os;
+    tabs.forEach(b => b.setAttribute("aria-selected", String(b.dataset.os === os)));
+    cmdEl.innerHTML = "";
+    const p = document.createElement("span"); p.className = "p"; p.textContent = commands[os].prompt;
+    cmdEl.append(p, document.createTextNode(commands[os].text));
+    noteEl.textContent = commands[os].note;
+  }
+  tabs.forEach(b => b.addEventListener("click", () => show(b.dataset.os)));
+  show(current);
+
+  const copyBtn = document.getElementById("copy-btn");
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(commands[current].text);
+      copyBtn.textContent = "Copied";
+    } catch {
+      const r = document.createRange(); r.selectNodeContents(cmdEl);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      copyBtn.textContent = "Press Ctrl+C";
+    }
+    setTimeout(() => (copyBtn.textContent = "Copy"), 1600);
+  });
+
+  fetch(`https://api.github.com/repos/${repo}/releases/latest`)
+    .then(r => (r.ok ? r.json() : null))
+    .then(rel => { if (rel && rel.tag_name) document.getElementById("version-pill").textContent = `Latest release ${rel.tag_name}`; })
+    .catch(() => {});
+
+  // ---- terminal demo -------------------------------------------------------
+  const term = document.getElementById("term");
+  const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const layers = [
+    { name: "config", size: 7.6 },
+    { name: "layer 1/4 a2318d6c47ec", size: 28.2 * 1024 },
+    { name: "layer 2/4 095d327c79ae", size: 40.3 * 1024 },
+    { name: "layer 3/4 bbfaa25db775", size: 0.6 * 1024 },
+    { name: "layer 4/4 7bb6fb0cfb2b", size: 1.4 * 1024 },
+  ];
+  const fmt = kib => kib >= 1024 ? `${(kib / 1024).toFixed(1)} MiB` : `${kib.toFixed(1)} KiB`;
+  const bar = (pct, w = 20) => {
+    const n = Math.round(pct / 100 * w);
+    return `<span class="t-g">${"█".repeat(n)}</span><span class="t-dim">${"░".repeat(w - n)}</span>`;
+  };
+  const pad = (s, n) => (s + " ".repeat(n)).slice(0, n);
+
+  let lines = [];
+  let live = [];
+  const render = (caret) => {
+    term.innerHTML = [...lines, ...live].join("\n") + (caret ? `<span class="caret">&nbsp;</span>` : "");
+  };
+  const out = (html) => { lines.push(html); render(false); };
+  async function typeCmd(cmd) {
+    const prompt = `<span class="t-g">~</span> <span class="t-dim">$</span> `;
+    lines.push(prompt);
+    for (let i = 1; i <= cmd.length; i++) {
+      lines[lines.length - 1] = prompt + esc(cmd.slice(0, i));
+      render(true);
+      await sleep(reduced ? 0 : 38 + Math.random() * 40);
+    }
+    await sleep(reduced ? 0 : 350);
+  }
+  function barsFrame(pcts, retries, speed, eta) {
+    const total = layers.reduce((a, l) => a + l.size, 0);
+    const got = layers.reduce((a, l, i) => a + l.size * pcts[i] / 100, 0);
+    live = layers.map((l, i) => {
+      const r = retries[i] ? ` <span class="t-a">retries:${retries[i]}</span>` : "";
+      const tail = pcts[i] >= 100 ? `<span class="t-g">done</span>` : `<span class="t-b">${speed[i] || ""}</span>`;
+      return `${pad(l.name, 24)}${r}${retries[i] ? "" : "          "} [${bar(pcts[i])}] ${pad(fmt(l.size * pcts[i] / 100) + " / " + fmt(l.size), 22)} ${tail}`;
+    });
+    live.push(`<span class="t-bold">${pad("total", 24)}</span>           [${bar(got / total * 100)}] ${pad(fmt(got) + " / " + fmt(total), 22)} <span class="t-b">${eta}</span>`);
+    render(false);
+  }
+  async function animate(from, to, opts) {
+    const steps = reduced ? 1 : opts.steps;
+    const retries = opts.retries || layers.map(() => 0);
+    for (let s = 1; s <= steps; s++) {
+      const p = from.map((f, i) => f + (to[i] - f) * s / steps);
+      if (opts.onStep) opts.onStep(s, retries);
+      barsFrame(p, retries, p.map(v => v < 100 ? opts.speed : ""), opts.eta(s / steps));
+      await sleep(reduced ? 0 : 90);
+    }
+    return retries;
+  }
+
+  async function run() {
+    lines = []; live = [];
+    await typeCmd("ddm pull nginx:latest");
+    out("Resolving nginx:latest (linux/amd64)");
+    await sleep(500);
+    out("Downloading 5 of 5 blobs (70.5 MiB)");
+    const half = [100, 58, 41, 100, 100];
+    const retries = await animate([0, 0, 0, 0, 0], half, {
+      steps: 34, speed: "312.4 KiB/s", eta: f => `ETA ${Math.max(1, Math.round(140 - f * 60))}s`,
+      onStep: (s, r) => { if (s === 14) r[1] = 1; if (s === 22) r[2] = 1; if (s === 27) r[1] = 2; },
+    });
+    await sleep(reduced ? 0 : 600);
+    lines.push(...live); live = [];
+    out(`<span class="t-r">^C</span>`);
+    out("Interrupted. Download progress is saved; run the same command again to resume.");
+    await sleep(reduced ? 0 : 1400);
+
+    await typeCmd("ddm pull nginx:latest");
+    lines = lines.slice(-2);
+    out("Resolving nginx:latest (linux/amd64)");
+    out("Downloading 2 of 5 blobs (68.5 MiB)");
+    await animate(half, [100, 100, 100, 100, 100], {
+      steps: 30, speed: "1.4 MiB/s", retries: [0, 0, 0, 0, 0], eta: f => (f >= 1 ? "done" : `ETA ${Math.max(1, Math.round(28 - f * 28))}s`),
+    });
+    lines.push(...live); live = [];
+    await sleep(reduced ? 0 : 400);
+    out("Loading nginx:latest into Docker");
+    await sleep(reduced ? 0 : 700);
+    out(`<span class="t-g">Loaded image: nginx:latest</span>`);
+    lines.push(`<span class="t-g">~</span> <span class="t-dim">$</span> `);
+    render(true);
+    if (!reduced) { await sleep(5000); run(); }
+  }
+  run();
+})();
+</script>
+</body>
+</html>

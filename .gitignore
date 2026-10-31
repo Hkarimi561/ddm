@@ -1,0 +1,5 @@
+/ddm
+/ddm.exe
+/dist/
+*.test
+coverage.out

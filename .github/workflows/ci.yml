@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check go.mod / go.sum
+        run: |
+          if [ -f go.sum ]; then
+            go mod tidy -diff
+          else
+            echo "::warning::go.sum is not committed; run 'go mod tidy' and commit it"
+            go mod tidy
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: |
+          # The race detector needs cgo, which the Windows runners don't set up.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go test ./...
+          else
+            go test -race ./...
+          fi
+
+  lint-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck install.sh
+        run: shellcheck scripts/install.sh
+
+  snapshot:
+    name: build binaries
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ddm-snapshot
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+
+  # Runs the real installers against the snapshot archives, the same way
+  # users run them: piped into bash / iex.
+  install-test:
+    name: install (${{ matrix.os }})
+    needs: [snapshot, lint-scripts]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ddm-snapshot
+          path: dist
+      - name: install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export DDM_BASE_URL="file://$PWD/dist" DDM_INSTALL_DIR="$RUNNER_TEMP/bin"
+          bash < scripts/install.sh
+          "$DDM_INSTALL_DIR/ddm" --version
+          "$DDM_INSTALL_DIR/ddm" pull --help > /dev/null
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:DDM_BASE_URL = Join-Path $PWD 'dist'
+          $env:DDM_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'ddm'
+          $env:DDM_NO_MODIFY_PATH = '1'
+          powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Raw scripts/install.ps1 | Invoke-Expression"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & (Join-Path $env:DDM_INSTALL_DIR 'ddm.exe') --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

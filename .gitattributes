@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings, even when checked out on Windows,
+# or `curl ... | bash` breaks on the stray carriage returns.
+*.sh text eol=lf
+*.ps1 text eol=crlf

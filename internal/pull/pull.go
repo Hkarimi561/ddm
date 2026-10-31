@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Hkarimi561/ddm/internal/cache"
+	"github.com/Hkarimi561/ddm/internal/diskspace"
 	"github.com/Hkarimi561/ddm/internal/docker"
 	"github.com/Hkarimi561/ddm/internal/engine"
 	"github.com/Hkarimi561/ddm/internal/registry"
@@ -148,6 +149,9 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 	if len(missing) == 0 {
 		return nil
 	}
+	if err := p.checkSpace(total); err != nil {
+		return err
+	}
 
 	eps, err := p.Registry.BlobEndpoints(ctx, img.Ref.Context())
 	if err != nil {
@@ -182,6 +186,38 @@ func (p *Puller) Fetch(ctx context.Context, img *registry.Image, opts Options) e
 		return ctx.Err()
 	}
 	return err
+}
+
+// NoSpaceError means the cache's disk can't hold a download.
+type NoSpaceError struct {
+	Path       string
+	Need, Free uint64
+}
+
+func (e *NoSpaceError) Error() string {
+	return fmt.Sprintf("not enough disk space: the download needs %s but only %s is free at %s; free up space or move the cache with `ddm config set cache_dir <dir>`",
+		ui.HumanBytes(int64(e.Need)), ui.HumanBytes(int64(e.Free)), e.Path)
+}
+
+// spaceMargin is kept free beyond the download itself.
+const spaceMargin = 256 << 20
+
+// checkSpace makes sure the cache's disk can hold another n bytes. Partial
+// downloads already have their full size reserved, but counting them again
+// errs on the safe side. If free space can't be determined, it doesn't block.
+func (p *Puller) checkSpace(n int64) error {
+	free, err := diskspace.Free(p.Cache.Root)
+	if err != nil {
+		if p.Log != nil {
+			p.Log.Debug("could not determine free disk space", "err", err)
+		}
+		return nil
+	}
+	need := uint64(n) + spaceMargin
+	if free < need {
+		return &NoSpaceError{Path: p.Cache.Root, Need: need, Free: free}
+	}
+	return nil
 }
 
 // Import loads a fully cached img into Docker.

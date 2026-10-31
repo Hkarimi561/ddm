@@ -40,9 +40,12 @@ func Execute() int {
 	}()
 
 	err := newRootCmd().ExecuteContext(ctx)
+	var exit *exitError
 	switch {
 	case err == nil:
 		return 0
+	case errors.As(err, &exit):
+		return exit.code
 	case errors.Is(err, context.Canceled):
 		fmt.Fprintln(os.Stderr, "\nInterrupted. Download progress is saved; run the same command again to resume.")
 		return 130
@@ -70,7 +73,7 @@ they stopped, even after a reboot.`,
 	pf.StringVar(&g.cacheDir, "cache-dir", "", "blob cache directory (default: $DDM_CACHE_DIR, cache_dir from the config, or the OS cache directory)")
 	pf.StringVar(&g.configPath, "config", "", "config file (default: $DDM_CONFIG or the OS config directory)")
 
-	root.AddCommand(newPullCmd(g), newConfigCmd(g), newMirrorCmd(g))
+	root.AddCommand(newPullCmd(g), newDockerCmd(g), newDoctorCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g))
 	return root
 }
 

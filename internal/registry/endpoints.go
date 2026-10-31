@@ -15,6 +15,11 @@ type Endpoint struct {
 	prefix   string // repository path prefix on the mirror
 }
 
+// BaseURL returns the endpoint's scheme and host, e.g. "https://mirror.example.com".
+func (e Endpoint) BaseURL() string {
+	return e.registry.Scheme() + "://" + e.registry.RegistryStr()
+}
+
 // Repo returns where upstream's repository lives on this endpoint.
 func (e Endpoint) Repo(upstream name.Repository) name.Repository {
 	if e.Upstream {

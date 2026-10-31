@@ -29,6 +29,27 @@ func (p Probe) Speed() float64 {
 	return float64(p.Bytes) / p.Elapsed.Seconds()
 }
 
+// Ping checks that ep answers the registry API at /v2/ and returns the round
+// trip time. "401 Unauthorized" counts as an answer: it is how registries
+// ask for a token.
+func (c *Client) Ping(ctx context.Context, ep Endpoint) (time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep.BaseURL()+"/v2/", nil)
+	if err != nil {
+		return 0, err
+	}
+	start := time.Now()
+	resp, err := (&http.Client{Transport: c.Transport}).Do(req)
+	if err != nil {
+		return 0, err
+	}
+	resp.Body.Close()
+	rtt := time.Since(start)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
+		return rtt, fmt.Errorf("HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	return rtt, nil
+}
+
 // ProbeEndpoint measures how well ep serves ref: the latency of fetching its
 // manifest, then the throughput of downloading the first maxBytes of its
 // largest layer, giving up on the download after maxTime.

@@ -8,9 +8,9 @@ then loads the finished image into your local Docker under its original name.
 Ctrl+C, a dropped Wi-Fi link, a crash or a reboot: run the same command again
 and it continues from the exact byte where it stopped.
 
-> **Status: Milestone 2** (download engine, `ddm pull`, import into Docker,
-> mirrors, config file, proxies). `ddm doctor`, the `ddm docker …`
-> pass-through and Model Runner support come in later milestones.
+> **Status: Milestone 3** (download engine, `ddm pull`, import into Docker,
+> mirrors, config file, proxies, `ddm docker …` pass-through, `ddm doctor`).
+> Docker Model Runner support comes in a later milestone.
 
 ## Install
 
@@ -68,6 +68,71 @@ ddm pull --no-load big/image:tag       # download only, e.g. while Docker is sto
 
 Credentials come from `~/.docker/config.json`, including credential helpers,
 so `docker login` works as usual, for mirrors too.
+
+## Docker pass-through
+
+Put `ddm` in front of a docker command. ddm downloads the images the command
+needs that aren't already in Docker, with resumable transfers and your
+mirrors, then runs the command unchanged. Your terminal, Ctrl+C and the exit
+code all behave exactly as with plain docker.
+
+```sh
+ddm docker run --rm -it ubuntu:24.04 bash
+ddm docker compose -f prod.yml --profile web up -d
+ddm docker pull --platform linux/arm64 nginx
+```
+
+| Command | What ddm does first |
+|---|---|
+| `run`, `create`, `container run/create` | downloads the image if Docker doesn't have it (`--platform` is honored, `--pull never` turns it off) |
+| `pull`, `image pull` | does the pull itself, so docker doesn't download it a second time |
+| `compose up/create/run` | downloads missing images of the services that will start, including `depends_on` (honors `-f`, `--profile`, `.env`, `--no-deps`); services with `build:` are left to compose |
+| `compose pull` | pulls the services' images itself |
+| anything else | nothing: the command goes straight to docker |
+
+Before downloading, ddm checks that the Docker engine is running and that
+the cache's disk has room, and stops with instructions if not. If ddm can't
+download an image (an unsupported format, say), docker gets to pull it as
+usual. ddm's messages go to stderr, so command output stays clean for
+pipes.
+
+### Use it for plain `docker` commands
+
+`ddm shell-init` prints a `docker` shell function that sends every docker
+command through ddm:
+
+```sh
+echo 'eval "$(ddm shell-init bash)"' >> ~/.bashrc     # zsh: ~/.zshrc and "zsh"
+echo 'ddm shell-init fish | source' >> ~/.config/fish/config.fish
+```
+
+```powershell
+Add-Content $PROFILE 'ddm shell-init powershell | Out-String | Invoke-Expression'
+```
+
+To skip ddm once, run `command docker …` (or `docker.exe …` in PowerShell).
+To turn it off for a whole session, set `DDM_PASSTHROUGH=off`.
+
+## Doctor
+
+`ddm doctor` checks everything ddm depends on and says how to fix what's
+wrong:
+
+- the docker CLI and engine (version, platform, image store)
+- the compose and model plugins
+- the config file
+- the cache directory and its free space
+- the proxy
+- whether every registry endpoint, mirrors included, answers
+
+```
+  OK    docker engine          28.3.0 on linux/amd64, Docker Desktop (containerd image store)
+  WARN  docker.io (upstream)   unreachable: HTTP 403 Forbidden
+                               -> Other endpoints work, so pulls can still succeed.
+```
+
+It exits with status 1 when something is broken. `--json` gives
+machine-readable output.
 
 ## Mirrors
 
@@ -196,8 +261,15 @@ whichever repository publishes them, forks included.
 
 ## Troubleshooting
 
-- **"the Docker daemon is not running"**: start Docker Desktop, or run
-  `sudo systemctl start docker` on Linux. Use `--no-load` to download anyway.
+Start with `ddm doctor`.
+
+- **"the Docker engine is not running"**: start Docker Desktop, or run
+  `sudo systemctl start docker` on Linux. Use `ddm pull --no-load` to
+  download anyway.
+- **"permission denied" on Linux**: add yourself to the docker group with
+  `sudo usermod -aG docker $USER`, then log out and back in.
+- **"not enough disk space"**: free some space, or move the cache with
+  `ddm config set cache_dir <dir>`.
 - **"access … was denied"**: the image name may be wrong, or the registry may
   need `docker login`.
 - **Downloads keep retrying**: run with `--verbose` to see every failed

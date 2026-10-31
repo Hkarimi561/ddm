@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"syscall"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -14,39 +14,26 @@ import (
 const (
 	runKey     = `Software\Microsoft\Windows\CurrentVersion\Run`
 	runValue   = "ddm-ui"
-	vbsName    = "ddm-ui.vbs"
 	appDataDir = "ddm"
 )
 
-// The UI is started through a tiny VBScript so that no console window
-// opens at login.
-func launcherPath() string {
-	return filepath.Join(os.Getenv("LOCALAPPDATA"), appDataDir, vbsName)
-}
-
-func launcherScript(exe string) string {
-	q := strings.ReplaceAll(exe, `"`, `""`)
-	return "' Starts the ddm web UI without a console window.\r\n" +
-		"CreateObject(\"WScript.Shell\").Run \"\"\"" + q + "\"\" serve\", 0, False\r\n"
+// Earlier versions started the UI through a VBScript, which antivirus
+// software blocks. It is only removed now.
+func legacyLauncherPath() string {
+	return filepath.Join(os.Getenv("LOCALAPPDATA"), appDataDir, "ddm-ui.vbs")
 }
 
 func installService(exe string) error {
-	vbs := launcherPath()
-	if err := os.MkdirAll(filepath.Dir(vbs), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(vbs, []byte(launcherScript(exe)), 0o644); err != nil {
-		return err
-	}
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
 	defer k.Close()
-	if err := k.SetStringValue(runValue, fmt.Sprintf(`wscript.exe "%s"`, vbs)); err != nil {
+	if err := k.SetStringValue(runValue, fmt.Sprintf(`"%s" service launch`, exe)); err != nil {
 		return err
 	}
-	if err := exec.Command("wscript.exe", vbs).Start(); err != nil {
+	_ = os.Remove(legacyLauncherPath())
+	if err := startDetached(exe, ""); err != nil {
 		return err
 	}
 	fmt.Println("Registered the web UI to start when you log in to Windows.")
@@ -62,7 +49,7 @@ func uninstallService() error {
 	if err := k.DeleteValue(runValue); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		return err
 	}
-	_ = os.Remove(launcherPath())
+	_ = os.Remove(legacyLauncherPath())
 	return nil
 }
 
@@ -76,8 +63,18 @@ func serviceInstalled() bool {
 	return err == nil
 }
 
-// startDetached is only used where there is no service manager, which
-// doesn't happen on Windows.
-func startDetached(exe, logPath string) error {
-	return exec.Command("wscript.exe", launcherPath()).Start()
+const (
+	createNoWindow  = 0x08000000
+	detachedProcess = 0x00000008
+)
+
+// startDetached runs `ddm serve` with no console window, independent of
+// the calling process. The web UI has its own log, so logPath is unused.
+func startDetached(exe, _ string) error {
+	cmd := exec.Command(exe, "serve")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow | detachedProcess,
+	}
+	return cmd.Start()
 }

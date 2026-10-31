@@ -37,7 +37,7 @@ now and at every login:
 
 It asks for a password, which install generates if none is set yet.`,
 	}
-	cmd.AddCommand(newServiceInstallCmd(g), newServiceUninstallCmd(g), newServiceStatusCmd(g), newServicePasswordCmd(g))
+	cmd.AddCommand(newServiceInstallCmd(g), newServiceUninstallCmd(g), newServiceStatusCmd(g), newServicePasswordCmd(g), newServiceLaunchCmd(g))
 	return cmd
 }
 
@@ -102,6 +102,24 @@ func newServiceInstallCmd(g *globals) *cobra.Command {
 				fmt.Println("Log in with your existing password (reset it with `ddm service password`).")
 			}
 			return nil
+		},
+	}
+}
+
+// newServiceLaunchCmd is what the Windows login entry runs: it starts
+// `ddm serve` without a console window and returns.
+func newServiceLaunchCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:    "launch",
+		Short:  "Start the web UI in the background (used at login)",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			exe, err := executable()
+			if err != nil {
+				return err
+			}
+			return startDetached(exe, g.uiLogPath())
 		},
 	}
 }

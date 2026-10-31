@@ -83,9 +83,8 @@
   .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 
   .hero { padding: 56px 0 24px; display: grid; gap: 40px; }
-  .hero > * { min-width: 0; } /* let the long install command scroll instead of widening the page */
-  .hero-text { max-width: 720px; }
-  .hero .install { max-width: 640px; }
+  .hero > * { min-width: 0; }
+  .hero-text h1 { max-width: 720px; }
   h1 { font-size: clamp(34px, 6vw, 54px); line-height: 1.05; letter-spacing: -0.03em; margin: 16px 0 18px; }
   h1 em { font-style: normal; color: var(--accent); }
   .lede { font-size: 18px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
@@ -97,8 +96,9 @@
     font: 600 14px var(--sans); color: var(--muted); border-bottom: 2px solid transparent;
   }
   .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-  .cmd { display: flex; align-items: center; gap: 10px; padding: 14px 14px 14px 16px; }
-  .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 14px; scrollbar-width: thin; }
+  .cmd { display: flex; align-items: flex-start; gap: 10px; padding: 14px 14px 14px 16px; }
+  /* Wrap long commands (breaking inside the URL if needed) instead of scrolling. */
+  .cmd code { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; padding-top: 3px; }
   .cmd code .p { color: var(--muted); user-select: none; }
   .copy {
     flex: none; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
@@ -313,7 +313,7 @@
   // Installers are published next to this page.
   let base = location.protocol.startsWith("http")
     ? location.origin + location.pathname.replace(/[^/]*$/, "")
-    : `https://${owner}.github.io/${name}/`;
+    : `https://${owner.toLowerCase()}.github.io/${name}/`;
   const commands = {
     unix: { prompt: "$ ", text: `curl -fsSL ${base}install.sh | bash`,
             note: "Installs to ~/.local/bin (or /usr/local/bin as root) and checks the sha256 of the download." },

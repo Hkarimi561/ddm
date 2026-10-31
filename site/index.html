@@ -78,11 +78,99 @@
   code, kbd, pre { font-family: var(--mono); }
   .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
 
+  /* ---- sticky header ---- */
+  html { scroll-behavior: smooth; }
+  section, #top { scroll-margin-top: 72px; }
+  .skip { position: absolute; left: 12px; top: -48px; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 8px 14px; border-radius: 8px; font-weight: 600; transition: top .2s; }
+  .skip:focus { top: 12px; }
+  .site-header {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    -webkit-backdrop-filter: saturate(1.5) blur(14px); backdrop-filter: saturate(1.5) blur(14px);
+    border-bottom: 1px solid transparent;
+    transition: border-color .3s, box-shadow .3s;
+  }
+  .site-header.scrolled { border-bottom-color: var(--border); box-shadow: 0 10px 30px -24px rgba(0, 0, 0, .55); }
+  /* Fixed height: a header that grows or shrinks while scrolling would
+     shift the page under the reader. */
   header.top {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    padding: 18px 0;
+    height: 60px;
   }
-  .top-right { display: flex; align-items: center; gap: 18px; }
+  .top-right { display: flex; align-items: center; gap: 14px; }
+  .brand svg { transition: transform .5s cubic-bezier(.34, 1.56, .64, 1); }
+  .brand:hover svg { transform: translateY(2px) rotate(-6deg); }
+  .scroll-progress {
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+    background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #38bdf8));
+    transform-origin: 0 50%; transform: scaleX(var(--progress, 0));
+  }
+
+  /* menu button (three bars that turn into an X) */
+  .menu-btn {
+    display: none; position: relative; width: 38px; height: 34px; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--surface); cursor: pointer; padding: 0;
+  }
+  .menu-btn span {
+    position: absolute; left: 10px; right: 10px; height: 2px; border-radius: 2px; background: var(--text);
+    transition: transform .35s cubic-bezier(.2, .7, .2, 1), opacity .2s;
+  }
+  .menu-btn span:nth-child(1) { top: 10px; }
+  .menu-btn span:nth-child(2) { top: 16px; }
+  .menu-btn span:nth-child(3) { top: 22px; }
+  .menu-btn[aria-expanded="true"] span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  .menu-btn[aria-expanded="true"] span:nth-child(2) { opacity: 0; transform: scaleX(.2); }
+  .menu-btn[aria-expanded="true"] span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+  .menu-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* slide-down section menu, floating over the page so opening and closing
+     it never moves the content */
+  .menu {
+    position: absolute; left: 0; right: 0; top: 100%;
+    display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr);
+    transition: grid-template-rows .4s cubic-bezier(.2, .7, .2, 1);
+    background: var(--bg);
+  }
+  .menu.open { border-bottom: 1px solid var(--border); box-shadow: 0 18px 30px -24px rgba(0, 0, 0, .5); }
+  .menu > .wrap {
+    overflow: hidden; min-width: 0; width: 100%;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px;
+  }
+  .menu.open { grid-template-rows: 1fr; }
+  .menu.open > .wrap { padding-bottom: 14px; }
+  .menu a {
+    display: block; padding: 10px 12px; border-radius: 10px; color: var(--text); text-decoration: none; font-weight: 500;
+    opacity: 0; transform: translateY(-6px); transition: opacity .3s, transform .3s, background-color .2s;
+  }
+  .menu.open a { opacity: 1; transform: none; transition-delay: calc(var(--i) * 35ms); }
+  .menu a:hover, .menu a.active { background: var(--surface-2); }
+  .menu a.active { color: var(--accent); }
+
+  /* back to top */
+  .to-top {
+    position: fixed; right: 18px; bottom: 18px; z-index: 40; width: 44px; height: 44px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); box-shadow: var(--shadow);
+    opacity: 0; transform: translateY(14px) scale(.9); pointer-events: none;
+    transition: opacity .3s, transform .35s cubic-bezier(.34, 1.4, .64, 1), border-color .2s;
+  }
+  .to-top svg { width: 18px; height: 18px; }
+  .to-top.show { opacity: 1; transform: none; pointer-events: auto; }
+  .to-top:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- scroll reveal ---- */
+  .js .reveal {
+    opacity: 0; transform: translateY(26px);
+    transition: opacity .75s cubic-bezier(.2, .7, .2, 1), transform .75s cubic-bezier(.2, .7, .2, 1);
+    transition-delay: var(--d, 0ms);
+  }
+  .js .reveal.in { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js .reveal { opacity: 1; transform: none; transition: none; }
+    .menu, .menu a, .to-top, .menu-btn span { transition: none; }
+  }
 
   /* ---- theme switch: light / system / dark ---- */
   .theme-switch {
@@ -117,9 +205,16 @@
   }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
   .brand svg { width: 28px; height: 28px; }
-  nav.links { display: flex; gap: 18px; align-items: center; font-size: 15px; }
-  nav.links a { color: var(--muted); text-decoration: none; }
+  nav.links { display: flex; gap: 4px; align-items: center; font-size: 14.5px; }
+  nav.links a { position: relative; color: var(--muted); text-decoration: none; padding: 6px 9px; border-radius: 8px; transition: color .2s; }
   nav.links a:hover { color: var(--text); }
+  nav.links a::after {
+    content: ""; position: absolute; left: 9px; right: 9px; bottom: 1px; height: 2px; border-radius: 2px;
+    background: var(--accent); transform: scaleX(0); transition: transform .35s cubic-bezier(.2, .7, .2, 1);
+  }
+  nav.links a:hover::after { transform: scaleX(.4); }
+  nav.links a.active { color: var(--text); }
+  nav.links a.active::after { transform: scaleX(1); }
   .pill {
     display: inline-flex; align-items: center; gap: 6px;
     border: 1px solid var(--border); border-radius: 999px;
@@ -288,8 +383,16 @@
     padding: 8px 10px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
   }
 
-  @media (max-width: 1040px) {
-    nav.links a.hide-sm { display: none; }
+  /* Section links inline when they fit; otherwise behind the menu button. */
+  @media (max-width: 1080px) {
+    nav.links a.section-link { display: none; }
+    .menu-btn { display: block; }
+  }
+  @media (min-width: 1081px) {
+    .menu { display: none; }
+  }
+  @media (max-width: 420px) {
+    nav.links a.gh { display: none; }
   }
   @media (max-width: 560px) {
     .hero { padding-top: 24px; }
@@ -297,22 +400,24 @@
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="site-header" id="site-header">
 <div class="wrap">
   <header class="top">
-    <a class="brand" href="#">
+    <a class="brand" href="#top" aria-label="ddm, back to top">
       <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M16 7v13m0 0-5-5m5 5 5-5M9 25h14" stroke="var(--accent-ink)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       ddm
     </a>
     <div class="top-right">
-      <nav class="links">
-        <a class="hide-sm" href="#features">Features</a>
-        <a class="hide-sm" href="#mirrors">Mirrors</a>
-        <a class="hide-sm" href="#passthrough">Pass-through</a>
-        <a class="hide-sm" href="#models">Models</a>
-        <a class="hide-sm" href="#control">Control</a>
-        <a class="hide-sm" href="#webui">Web UI</a>
-        <a class="hide-sm" href="#usage">Usage</a>
-        <a id="gh-link" href="#">GitHub</a>
+      <nav class="links" aria-label="Sections">
+        <a class="section-link" href="#features">Features</a>
+        <a class="section-link" href="#mirrors">Mirrors</a>
+        <a class="section-link" href="#passthrough">Pass-through</a>
+        <a class="section-link" href="#models">Models</a>
+        <a class="section-link" href="#control">Control</a>
+        <a class="section-link" href="#webui">Web UI</a>
+        <a class="section-link" href="#usage">Usage</a>
+        <a id="gh-link" class="gh" href="#">GitHub</a>
       </nav>
       <div class="theme-switch" role="radiogroup" aria-label="Color theme">
         <span class="theme-thumb" aria-hidden="true"></span>
@@ -326,10 +431,18 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
         </button>
       </div>
+      <button type="button" class="menu-btn" id="menu-btn" aria-expanded="false" aria-controls="menu" aria-label="Open the section menu">
+        <span></span><span></span><span></span>
+      </button>
     </div>
   </header>
+</div>
+<nav class="menu" id="menu" aria-label="Sections"><div class="wrap" id="menu-links"></div></nav>
+<div class="scroll-progress" id="scroll-progress" aria-hidden="true"></div>
+</div>
 
-  <main>
+<div class="wrap" id="top">
+  <main id="main">
     <div class="hero">
       <div class="hero-text">
         <span class="pill"><span class="dot"></span><span id="version-pill">Docker download manager</span></span>
@@ -781,6 +894,10 @@ Freed 466.7 MiB: 12 blob(s), 0 unfinished download(s), forgetting docker.io/libr
   </div>
 </footer>
 
+<a class="to-top" id="to-top" href="#top" aria-label="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</a>
+
 <script>
 // ---- theme switch -----------------------------------------------------------
 (() => {
@@ -849,6 +966,106 @@ Freed 466.7 MiB: 12 blob(s), 0 unfinished download(s), forgetting docker.io/libr
     next.click();
   });
   mark(saved());
+})();
+
+// ---- header, section menu and scroll effects --------------------------------
+(() => {
+  const root = document.documentElement;
+  const header = document.getElementById("site-header");
+  const progress = document.getElementById("scroll-progress");
+  const toTop = document.getElementById("to-top");
+  const menu = document.getElementById("menu");
+  const menuBtn = document.getElementById("menu-btn");
+  const menuLinks = document.getElementById("menu-links");
+
+  // The slide-down menu lists the same sections as the header, plus one
+  // the header has no room for.
+  const entries = [...document.querySelectorAll("nav.links a.section-link")]
+    .map(a => [a.getAttribute("href"), a.textContent]);
+  entries.splice(entries.length - 1, 0, ["#how", "How it works"]);
+  entries.forEach(([href, text], i) => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = text;
+    a.style.setProperty("--i", i);
+    menuLinks.append(a);
+  });
+  const setMenu = open => {
+    menu.classList.toggle("open", open);
+    menuBtn.setAttribute("aria-expanded", String(open));
+    menuBtn.setAttribute("aria-label", open ? "Close the section menu" : "Open the section menu");
+  };
+  menuBtn.addEventListener("click", () => setMenu(!menu.classList.contains("open")));
+  menuLinks.addEventListener("click", e => { if (e.target.closest("a")) setMenu(false); });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && menu.classList.contains("open")) { setMenu(false); menuBtn.focus(); }
+  });
+  document.addEventListener("click", e => {
+    if (menu.classList.contains("open") && !header.contains(e.target)) setMenu(false);
+  });
+
+  // In-page links scroll smoothly (instantly with reduced motion), stopping
+  // below the sticky header thanks to scroll-margin-top.
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  document.addEventListener("click", e => {
+    const a = e.target.closest('a[href^="#"]');
+    const id = a && a.getAttribute("href").slice(1);
+    const target = id && document.getElementById(id);
+    if (!target) return;
+    e.preventDefault();
+    target.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
+    try { history.replaceState(null, "", id === "top" ? location.pathname + location.search : "#" + id); } catch {}
+  });
+
+  // Compact header, reading progress and the back-to-top button follow the
+  // scroll position, updated at most once per frame.
+  let queued = false;
+  const onScroll = () => {
+    queued = false;
+    const y = scrollY;
+    const max = root.scrollHeight - innerHeight;
+    header.classList.toggle("scrolled", y > 8);
+    progress.style.setProperty("--progress", max > 0 ? Math.min(1, y / max).toFixed(4) : 0);
+    toTop.classList.toggle("show", y > innerHeight * 0.9);
+  };
+  addEventListener("scroll", () => {
+    if (!queued) { queued = true; requestAnimationFrame(onScroll); }
+  }, { passive: true });
+  addEventListener("resize", onScroll);
+  onScroll();
+
+  if (!("IntersectionObserver" in window)) return;
+
+  // Highlight the section crossing a line a third of the way down the screen.
+  const navLinks = [...document.querySelectorAll("nav.links a.section-link, #menu-links a")];
+  const ids = [...new Set(navLinks.map(a => a.getAttribute("href").slice(1)))];
+  const spy = new IntersectionObserver(observed => {
+    const hit = observed.filter(e => e.isIntersecting).map(e => e.target.id)[0];
+    if (!hit) return;
+    navLinks.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + hit));
+  }, { rootMargin: "-33% 0px -62% 0px" });
+  ids.forEach(id => { const el = document.getElementById(id); if (el) spy.observe(el); });
+
+  // Reveal content as it scrolls into view; siblings arrive one after another.
+  root.classList.add("js");
+  const targets = document.querySelectorAll([
+    ".hero-text > *", ".hero > .term",
+    "section > h2", "section > .sub", "section > .grid > *", "section > .term", "section > .browser",
+    "section > .table-wrap", "section > .mirrors > *", "section > .pt > *", "ol.steps > li", ".roadmap > div",
+  ].join(", "));
+  const reveal = new IntersectionObserver(observed => {
+    observed.forEach(e => {
+      if (!e.isIntersecting) return;
+      e.target.classList.add("in");
+      reveal.unobserve(e.target);
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" });
+  targets.forEach(el => {
+    const siblings = [...el.parentElement.children].filter(c => c.matches && [...targets].includes(c));
+    el.style.setProperty("--d", Math.min(siblings.indexOf(el) * 80, 400) + "ms");
+    el.classList.add("reveal");
+    reveal.observe(el);
+  });
 })();
 
 (() => {

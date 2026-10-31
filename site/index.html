@@ -159,6 +159,40 @@
   footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--border); margin-top: 24px; }
   footer .wrap { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
 
+  /* ---- mirrors section ---- */
+  :root { --m1: #d97706; --m2: #0284c7; --m3: var(--accent); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --m1: #fbbf24; --m2: #38bdf8; } }
+  :root[data-theme="dark"] { --m1: #fbbf24; --m2: #38bdf8; }
+  .mirrors { display: grid; gap: 20px; }
+  .mirrors > * { min-width: 0; }
+  .chain { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: grid; gap: 0 36px; }
+  .chain > * { min-width: 0; }
+  @media (min-width: 760px) { .chain { grid-template-columns: 1fr 1fr; } .chain .blob { margin-top: 0; } }
+  .chain h3 { margin: 0 0 12px; font-size: 16px; }
+  .chain ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .node {
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2);
+    transition: border-color .2s, opacity .2s;
+  }
+  .node .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--c); }
+  .node code { font-size: 13.5px; min-width: 0; overflow-wrap: anywhere; }
+  .node small { margin-left: auto; color: var(--muted); font-size: 12.5px; text-align: right; }
+  .node.active { border-color: var(--c); }
+  .node.left { opacity: .55; }
+  .node.left small { color: var(--c); }
+  .why { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; padding: 0; list-style: none; }
+  .why li { font-size: 13px; border: 1px dashed var(--border); border-radius: 999px; padding: 3px 11px; color: var(--muted); }
+  .blob { margin-top: 22px; }
+  .blob-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13.5px; margin-bottom: 8px; }
+  .blob-head span { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+  .track { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); }
+  .track i { display: block; height: 100%; width: 0; }
+  .blob-status { min-height: 2.9em; margin: 10px 0 0; font-size: 14px; color: var(--muted); }
+  .blob-status b { color: var(--text); font-weight: 600; }
+  .note { font-size: 14px; color: var(--muted); margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+  .term pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 0; }
+
   @media (max-width: 560px) {
     nav.links a.hide-sm { display: none; }
     .hero { padding-top: 24px; }
@@ -174,6 +208,7 @@
     </a>
     <nav class="links">
       <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#mirrors">Mirrors</a>
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#usage">Usage</a>
       <a id="gh-link" href="#">GitHub</a>
@@ -185,7 +220,7 @@
       <div class="hero-text">
         <span class="pill"><span class="dot"></span><span id="version-pill">Docker download manager</span></span>
         <h1>Docker pulls that <em>survive</em> bad networks.</h1>
-        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped.</p>
+        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped. If a mirror lets you down, it moves to the next one without losing a byte.</p>
 
         <div class="install" id="install">
           <div class="tabs" role="tablist">
@@ -243,6 +278,61 @@
       </div>
     </section>
 
+    <section id="mirrors">
+      <h2>Mirrors that hand over mid-download</h2>
+      <p class="sub">Give each registry a list of mirrors. ddm tries them in order, with the registry itself last, and switches the moment one stops pulling its weight. Bytes are identified by their digest, so the next mirror picks up exactly where the last one stopped.</p>
+      <div class="mirrors">
+        <div class="chain">
+          <div>
+          <h3>Tried in this order for docker.io</h3>
+          <ol id="chain">
+            <li class="node" style="--c: var(--m1)"><span class="dot"></span><code>docker.arvancloud.ir</code><small>mirror 1</small></li>
+            <li class="node" style="--c: var(--m2)"><span class="dot"></span><code>mirror.example.com</code><small>mirror 2</small></li>
+            <li class="node" style="--c: var(--m3)"><span class="dot"></span><code>docker.io</code><small>upstream</small></li>
+          </ol>
+          <ul class="why" aria-label="Reasons to switch">
+            <li>keeps failing</li>
+            <li>doesn't have the blob</li>
+            <li>slower than <code>min_speed</code></li>
+          </ul>
+          </div>
+
+          <div class="blob" aria-label="Animated example of one layer downloaded from three sources">
+            <div class="blob-head"><b>layer 2/4</b><span id="blob-count">0 / 40.3 MiB</span></div>
+            <div class="track"><i id="seg-0" style="background: var(--m1)"></i><i id="seg-1" style="background: var(--m2)"></i><i id="seg-2" style="background: var(--m3)"></i></div>
+            <p class="blob-status" id="blob-status">&nbsp;</p>
+            <p class="note">Each color is the share of one layer that came from that source. The pieces fit together because the finished layer is checked against its sha256.</p>
+          </div>
+        </div>
+
+        <div class="term" aria-label="Example of adding and testing mirrors">
+          <div class="term-bar"><i></i><i></i><i></i><span>~ — bash</span></div>
+<pre class="wrap"><span class="t-g">~</span> <span class="t-dim">$</span> ddm mirror add docker.io https://docker.arvancloud.ir
+Added https://docker.arvancloud.ir as mirror #1 of docker.io.
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm mirror add docker.io https://mirror.example.com
+Added https://mirror.example.com as mirror #2 of docker.io.
+<span class="t-g">~</span> <span class="t-dim">$</span> ddm mirror test docker.io --apply
+Testing 3 endpoint(s) for docker.io with index.docker.io/library/ubuntu:latest (up to 8.0 MiB or 15s each)
+
+  https://docker.arvancloud.ir ... <span class="t-b">2.1 MiB/s</span>
+  https://mirror.example.com ... <span class="t-b">5.8 MiB/s</span>
+  docker.io ... <span class="t-r">failed</span>
+
+<span class="t-bold">RANK  ENDPOINT                      LATENCY  SPEED      RESULT</span>
+1     https://mirror.example.com    182ms    <span class="t-g">5.8 MiB/s</span>  ok
+2     https://docker.arvancloud.ir  96ms     <span class="t-g">2.1 MiB/s</span>  ok
+3     docker.io (upstream)          1.204s   -          <span class="t-r">403 Forbidden</span>
+
+Suggested order:
+  1. https://mirror.example.com
+  2. https://docker.arvancloud.ir
+  3. docker.io
+
+Saved the new order for docker.io.</pre>
+        </div>
+      </div>
+    </section>
+
     <section id="how">
       <h2>How it works</h2>
       <p class="sub">ddm skips Docker's downloader and only hands Docker the finished result. No network is involved in that last step.</p>
@@ -269,6 +359,11 @@
             <tr><td><code>ddm pull --no-load IMAGE</code></td><td>Only download into the cache, e.g. while Docker is stopped</td></tr>
             <tr><td><code>ddm pull --stall-timeout 1m IMAGE</code></td><td>Replace a connection after it has sent nothing for a minute</td></tr>
             <tr><td><code>ddm pull --verbose IMAGE</code></td><td>Show every retry and its cause</td></tr>
+            <tr><td><code>ddm mirror add docker.io URL</code></td><td>Add a mirror; <code>--first</code> tries it before the others</td></tr>
+            <tr><td><code>ddm mirror test docker.io --apply</code></td><td>Measure every mirror and save the fastest order</td></tr>
+            <tr><td><code>ddm mirror list</code></td><td>Show mirrors in the order they are tried</td></tr>
+            <tr><td><code>ddm config set proxy socks5://127.0.0.1:1080</code></td><td>Send registry traffic through a proxy (http, https or socks5)</td></tr>
+            <tr><td><code>ddm config list</code></td><td>Show every setting and where the config file lives</td></tr>
           </tbody>
         </table>
       </div>
@@ -279,7 +374,7 @@
       <p class="sub">ddm is being built in milestones.</p>
       <div class="roadmap">
         <div class="done"><b>Resumable engine</b><code>ddm pull</code> and the Docker import</div>
-        <div><b>Mirrors</b>Per-registry mirrors with automatic fallback and <code>ddm mirror test</code></div>
+        <div class="done"><b>Mirrors &amp; config</b>Mirror fallback, <code>ddm mirror test</code>, proxies, config file <em>(in testing)</em></div>
         <div><b>Pass-through</b><code>ddm docker run …</code> fetches what a command needs, then runs it</div>
         <div><b>Docker models</b><code>ddm model pull</code> for Docker Model Runner</div>
         <div><b>Polish</b>Pause/resume, bandwidth limits, cache cleanup</div>
@@ -446,6 +541,75 @@
     if (!reduced) { await sleep(5000); run(); }
   }
   run();
+
+  // ---- mirror hand-over demo ------------------------------------------------
+  const totalMiB = 40.3;
+  const nodes = [...document.querySelectorAll("#chain .node")];
+  const segs = [0, 1, 2].map(i => document.getElementById(`seg-${i}`));
+  const countEl = document.getElementById("blob-count");
+  const statusEl = document.getElementById("blob-status");
+  const roles = ["mirror 1", "mirror 2", "upstream"];
+  const hosts = ["docker.arvancloud.ir", "mirror.example.com", "docker.io"];
+  // Each leg: the source, how far it gets (%), its speed, and why ddm leaves it.
+  const legs = [
+    { src: 0, to: 23, speed: "41 KiB/s", tag: "too slow", leave: "stayed below min_speed (64 KiB/s) for 30s" },
+    { src: 1, to: 64, speed: "5.8 MiB/s", tag: "kept failing", leave: "reset the connection 3 times in a row" },
+    { src: 2, to: 100, speed: "3.1 MiB/s" },
+  ];
+  const widths = [0, 0, 0];
+  const mib = pct => (totalMiB * pct / 100).toFixed(1);
+  const draw = () => {
+    segs.forEach((s, i) => (s.style.width = widths[i] + "%"));
+    countEl.textContent = `${mib(widths[0] + widths[1] + widths[2])} / ${totalMiB} MiB`;
+  };
+  const markNodes = (active, left) => nodes.forEach((n, i) => {
+    n.classList.toggle("active", i === active);
+    n.classList.toggle("left", left.has(i));
+    n.querySelector("small").textContent = left.get(i) || roles[i];
+  });
+
+  async function handOver() {
+    widths.fill(0);
+    draw();
+    const left = new Map();
+    let at = 0;
+    for (const leg of legs) {
+      markNodes(leg.src, left);
+      statusEl.innerHTML = `Downloading from <b>${hosts[leg.src]}</b> at ${leg.speed}`;
+      const steps = reduced ? 1 : Math.round((leg.to - at) * (leg.src === 0 ? 2.4 : 0.8));
+      for (let s = 1; s <= steps; s++) {
+        widths[leg.src] = (leg.to - at) * s / steps;
+        draw();
+        await sleep(reduced ? 0 : 60);
+      }
+      at = leg.to;
+      if (leg.leave) {
+        left.set(leg.src, leg.tag);
+        markNodes(-1, left);
+        statusEl.innerHTML = `<b>${hosts[leg.src]}</b> ${leg.leave}. Switching to <b>${hosts[leg.src + 1]}</b>, continuing at ${mib(at)} MiB.`;
+        await sleep(reduced ? 0 : 2200);
+      }
+    }
+    markNodes(-1, left);
+    statusEl.innerHTML = `<b>Done:</b> sha256 verified. One layer, three sources, no byte downloaded twice.`;
+    if (!reduced) {
+      await sleep(5000);
+      handOver();
+    }
+  }
+  // Start when the section scrolls into view, so the hand-over is seen from the beginning.
+  const chainEl = document.getElementById("chain");
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) {
+        io.disconnect();
+        handOver();
+      }
+    }, { threshold: 0.4 });
+    io.observe(chainEl);
+  } else {
+    handOver();
+  }
 })();
 </script>
 </body>

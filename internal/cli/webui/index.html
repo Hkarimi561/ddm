@@ -77,6 +77,14 @@
   .login input { width: 100%; margin: 10px 0; }
   .login button { width: 100%; }
   .error { color: var(--danger); font-size: 14px; min-height: 1.4em; }
+  pre.out { background: #0b0f0d; color: #d7e3db; border-radius: 10px; padding: 12px 14px; margin: 10px 0 0; font: 12.5px/1.45 var(--mono); max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .jobs { display: grid; gap: 6px; }
+  .job { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+  .job[aria-current="true"] { border-color: var(--accent); }
+  .job code { flex: 1; overflow-wrap: anywhere; font-size: 13px; }
+  .job .st { font-size: 12px; font-weight: 700; }
+  .job .st.failed, .job .st.cancelled { color: var(--danger); }
+  .job .st.done { color: var(--accent); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -89,6 +97,7 @@
     </div>
     <nav id="nav" hidden role="tablist">
       <button data-tab="downloads" aria-selected="true">Downloads</button>
+      <button data-tab="commands">Commands</button>
       <button data-tab="settings">Settings</button>
       <button data-tab="mirrors">Mirrors</button>
       <button data-tab="cache">Cache</button>
@@ -126,6 +135,37 @@
       <h2>Unfinished downloads</h2>
       <p class="sub">Kept in the cache; they continue when the same image or model is pulled again.</p>
       <div id="partials"></div>
+    </div>
+  </section>
+
+  <!-- commands -->
+  <section data-view="commands" hidden>
+    <div class="panel">
+      <h2>Commands</h2>
+      <p class="sub">Pull an image with ddm (resumable, uses your mirrors) or run any docker command. It runs on this computer with your Docker access, so treat it like a terminal. Interactive input (<code>-it</code>) isn't possible; use <code>-d</code> for long-running containers.</p>
+      <form class="row" id="cmd-form">
+        <select id="cmd-kind" aria-label="Command type">
+          <option value="pull">ddm pull</option>
+          <option value="docker">docker</option>
+        </select>
+        <input type="text" id="cmd-text" placeholder="nginx:latest" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex: 1; min-width: 220px" required>
+        <button class="btn primary" type="submit" id="cmd-run">Run</button>
+      </form>
+      <p class="muted small" id="cmd-hint">Pull: an image such as <code>nginx:latest</code> or <code>--platform linux/arm64 ghcr.io/org/app:1.2</code>. Docker: the arguments, such as <code>ps -a</code>, <code>run -d -p 8080:80 nginx</code> or <code>compose -f app.yml up -d</code>.</p>
+      <p class="error" id="cmd-off" hidden>Running commands from the web UI is turned off. Turn it on with <code>ddm config set ui_commands true</code>.</p>
+    </div>
+    <div class="panel">
+      <h2>Output</h2>
+      <div class="row" id="job-head" hidden style="justify-content: space-between">
+        <code id="job-title"></code>
+        <span class="row"><span class="st small" id="job-status"></span><button class="btn" id="job-cancel" hidden>Cancel</button></span>
+      </div>
+      <pre class="out" id="job-out">Nothing run yet.</pre>
+    </div>
+    <div class="panel">
+      <h2>History</h2>
+      <p class="sub">Kept until ddm restarts.</p>
+      <div class="jobs" id="jobs"><span class="muted small">No commands yet.</span></div>
     </div>
   </section>
 
@@ -245,7 +285,7 @@
     current = tab;
     document.querySelectorAll("#nav button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
     document.querySelectorAll("[data-view]").forEach(v => (v.hidden = v.dataset.view !== tab));
-    ({ downloads: loadStatus, settings: loadConfig, mirrors: loadConfig, cache: loadCache })[tab]?.();
+    ({ downloads: loadStatus, commands: loadJobs, settings: loadConfig, mirrors: loadConfig, cache: loadCache })[tab]?.();
     try { localStorage.setItem("ddm-tab", tab); } catch {}
   }
   document.querySelectorAll("#nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
@@ -329,6 +369,7 @@
     const r = await api("POST", "/api/limit", { pid: 0, rate });
     toast(r.pids.length ? (rate === "0" ? "Speed limit removed" : `Limited to ${rate}/s`) : "Nothing is downloading");
   }));
+  setInterval(() => { if (current === "commands" && !$("nav").hidden && document.visibilityState === "visible") loadJobs().catch(() => {}); }, 1000);
   setInterval(() => { if (current === "downloads" && !$("nav").hidden && document.visibilityState === "visible") loadStatus().catch(() => {}); }, 1000);
 
   // ---- settings -----------------------------------------------------------
@@ -432,6 +473,60 @@
   $("gc-run").addEventListener("click", act(() => gc({ older_than: $("gc-age").value })));
   $("gc-all").addEventListener("click", act(async () => {
     if (confirm("Delete everything in the ddm cache? Running downloads are kept; images and models already in Docker stay there.")) await gc({ all: true });
+  }));
+
+  // ---- commands -----------------------------------------------------------
+  let jobId = null, jobFrom = 0, jobList = [];
+  function renderJobs() {
+    $("jobs").innerHTML = jobList.length ? jobList.map(j => `<div class="job" data-job="${j.id}" aria-current="${j.id === jobId}">
+      <span class="muted small">${esc(j.kind === "pull" ? "pull" : "docker")}</span><code>${esc(j.command)}</code>
+      <span class="st ${esc(j.status)}">${esc(j.status === "failed" ? "failed (" + j.exit + ")" : j.status)}</span></div>`).join("")
+      : '<span class="muted small">No commands yet.</span>';
+  }
+  async function loadJobs() {
+    const r = await api("GET", "/api/jobs");
+    jobList = r.jobs || [];
+    $("cmd-off").hidden = r.enabled;
+    $("cmd-run").disabled = !r.enabled;
+    renderJobs();
+    if (jobId === null && jobList.length) selectJob(jobList[0].id, true);
+    else if (jobId !== null) await pollJob();
+  }
+  async function pollJob() {
+    const j = await api("GET", `/api/jobs/${jobId}?from=${jobFrom}`);
+    const out = $("job-out");
+    const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+    if (j.output) { out.textContent += j.output; if (atEnd) out.scrollTop = out.scrollHeight; }
+    jobFrom = j.next;
+    $("job-head").hidden = false;
+    $("job-title").textContent = j.command;
+    $("job-status").textContent = j.status === "failed" ? `failed (exit ${j.exit})` : j.status;
+    $("job-cancel").hidden = j.status !== "running";
+  }
+  function selectJob(id, quiet) {
+    jobId = id; jobFrom = 0;
+    $("job-out").textContent = "";
+    renderJobs();
+    pollJob().catch(e => { if (!quiet) toast(e.message, true); });
+  }
+  $("jobs").addEventListener("click", e => {
+    const el = e.target.closest("[data-job]");
+    if (el) selectJob(Number(el.dataset.job));
+  });
+  $("cmd-form").addEventListener("submit", act(async e => {
+    e.preventDefault();
+    const text = $("cmd-text").value.trim();
+    if (!text) return;
+    const j = await api("POST", "/api/jobs", { kind: $("cmd-kind").value, command: text });
+    $("cmd-text").value = "";
+    jobList = [j, ...jobList];
+    selectJob(j.id);
+  }));
+  $("cmd-kind").addEventListener("change", () => {
+    $("cmd-text").placeholder = $("cmd-kind").value === "pull" ? "nginx:latest" : "ps -a";
+  });
+  $("job-cancel").addEventListener("click", act(async () => {
+    if (jobId !== null) { await api("POST", `/api/jobs/${jobId}/cancel`, {}); await loadJobs(); }
   }));
 
   // ---- account ------------------------------------------------------------

@@ -109,6 +109,7 @@ type uiServer struct {
 	sessions *uiauth.Sessions
 	throttle *uiauth.Throttle
 	mux      *http.ServeMux
+	jobs     jobs
 
 	pwMu  sync.Mutex
 	pwMod time.Time // modification time of the password file last seen
@@ -135,6 +136,10 @@ func newUIServer(g *globals, pwPath string) *uiServer {
 	s.mux.HandleFunc("POST /api/pause", s.authed(s.control("pause")))
 	s.mux.HandleFunc("POST /api/resume", s.authed(s.control("resume")))
 	s.mux.HandleFunc("POST /api/limit", s.authed(s.control("limit")))
+	s.mux.HandleFunc("GET /api/jobs", s.authed(s.listJobs))
+	s.mux.HandleFunc("POST /api/jobs", s.authed(s.startJob))
+	s.mux.HandleFunc("GET /api/jobs/{id}", s.authed(s.getJob))
+	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.authed(s.cancelJob))
 	s.mux.HandleFunc("GET /api/cache", s.authed(s.getCache))
 	s.mux.HandleFunc("POST /api/cache/gc", s.authed(s.cacheGC))
 	return s

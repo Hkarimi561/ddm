@@ -29,6 +29,7 @@ type Config struct {
 	MinSpeed     int64 // bytes/s; a mirror slower than this is switched away from (0 = never)
 	RateLimit    int64 // bytes/s for all downloads of a process together (0 = unlimited)
 	UIAddress    string
+	UICommands   bool // allow pulling and running docker commands from the web UI
 	Proxy        string
 	NoProxy      string
 	CacheDir     string
@@ -45,6 +46,7 @@ func Defaults() Config {
 		StallTimeout: 30 * time.Second,
 		MinSpeed:     32 << 10,
 		UIAddress:    "127.0.0.1:7878",
+		UICommands:   true,
 		Mirrors:      map[string][]string{},
 	}
 }
@@ -106,6 +108,16 @@ var Keys = []Key{
 				return fmt.Errorf("want host:port, like 127.0.0.1:7878")
 			}
 			c.UIAddress = net.JoinHostPort(host, port)
+			return nil
+		}},
+	{"ui_commands", "let the web UI pull images and run docker commands (true or false; applies at once)",
+		func(c *Config) string { return strconv.FormatBool(c.UICommands) },
+		func(c *Config, v string) error {
+			b, err := strconv.ParseBool(strings.TrimSpace(v))
+			if err != nil {
+				return fmt.Errorf("want true or false")
+			}
+			c.UICommands = b
 			return nil
 		}},
 	{"proxy", "proxy for all registry traffic: http://, https:// or socks5:// (default: HTTP(S)_PROXY)",

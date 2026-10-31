@@ -35,6 +35,23 @@ change the defaults: `DDM_VERSION=v0.1.0` installs a specific release,
 `DDM_INSTALL_DIR` picks the folder, and `DDM_NO_MODIFY_PATH=1` (Windows)
 leaves PATH alone. Prebuilt archives are also on the Releases page.
 
+## Web UI commands
+
+The **Commands** tab in the web UI pulls images and runs docker commands from
+the browser. "ddm pull" takes what `ddm pull` takes (`nginx:latest`,
+`--platform linux/arm64 ghcr.io/org/app:1.2`); "docker" takes the arguments of
+any docker command (`ps -a`, `run -d -p 8080:80 nginx`, `compose -f app.yml
+up -d`). Output streams live, finished commands stay in a history list, and a
+running one can be cancelled. Commands run as `ddm pull` / `ddm docker`, so
+pulls are resumable, use your mirrors and show up in the Downloads tab.
+
+Commands run on the computer ddm is installed on, with your user's Docker
+access, which is close to a shell: keep the web UI on `127.0.0.1` (the
+default) or behind a strong password, and turn the feature off with
+`ddm config set ui_commands false`. There is no shell: `;`, `&&`, `|` and
+`$(...)` are passed to docker as plain text, and interactive input (`-it`)
+isn't available.
+
 ## Update
 
 ```sh

@@ -35,6 +35,18 @@ change the defaults: `DDM_VERSION=v0.1.0` installs a specific release,
 `DDM_INSTALL_DIR` picks the folder, and `DDM_NO_MODIFY_PATH=1` (Windows)
 leaves PATH alone. Prebuilt archives are also on the Releases page.
 
+## Update
+
+```sh
+ddm update              # install the latest release and restart the web UI
+ddm update --check      # only say whether a newer version exists
+ddm update --version v0.5.1   # a specific release (also to go back)
+```
+
+`ddm update` downloads the release for your OS and CPU, checks it against
+`checksums.txt`, makes sure the new binary starts, and only then replaces the
+running one. Running the install command again does the same thing.
+
 ## Build from source
 
 You need Go 1.25 or newer. Docker is only needed at runtime.

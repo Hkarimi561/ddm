@@ -13,6 +13,8 @@
 #   DDM_OS, DDM_ARCH override platform detection
 #   DDM_NO_SERVICE   set to 1 to skip starting the web UI service
 #
+# Run it again at any time to update; `ddm update` does the same from ddm itself.
+#
 # Everything lives inside main(), so a download cut off half-way through
 # never runs a partial script.
 
@@ -62,13 +64,21 @@ main() {
     if [ "$(id -u)" = "0" ]; then dir="/usr/local/bin"; else dir="$HOME/.local/bin"; fi
   fi
   mkdir -p "$dir"
+  local previous=""
+  [ -x "$dir/ddm" ] && previous="$("$dir/ddm" --version 2>/dev/null || true)"
   # Write next to the target and rename, so an already running ddm is not
   # disturbed and a failed copy never leaves a broken binary behind.
   cp "$tmp/ddm" "$dir/.ddm.new"
   chmod 755 "$dir/.ddm.new"
   mv -f "$dir/.ddm.new" "$dir/ddm"
 
-  say "Installed $("$dir/ddm" --version 2>/dev/null || echo ddm) to $dir/ddm"
+  local installed
+  installed="$("$dir/ddm" --version 2>/dev/null || echo ddm)"
+  if [ -n "$previous" ] && [ "$previous" != "$installed" ]; then
+    say "Updated $previous -> $installed ($dir/ddm)"
+  else
+    say "Installed $installed to $dir/ddm"
+  fi
 
   case ":$PATH:" in
     *":$dir:"*) ;;

@@ -88,7 +88,7 @@ they stopped, even after a reboot.`,
 	root.AddCommand(
 		newPullCmd(g), newModelCmd(g), newDockerCmd(g),
 		newStatusCmd(g), newPauseCmd(g), newResumeCmd(g), newLimitCmd(g),
-		newCacheCmd(g), newServiceCmd(g), newServeCmd(g), newDoctorCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g),
+		newCacheCmd(g), newServiceCmd(g), newServeCmd(g), newDoctorCmd(g), newUpdateCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g),
 	)
 	return root, g
 }

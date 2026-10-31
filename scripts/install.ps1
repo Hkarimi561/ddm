@@ -12,6 +12,8 @@
 #   DDM_NO_MODIFY_PATH  set to 1 to leave the user PATH alone
 #   DDM_NO_SERVICE      set to 1 to skip starting the web UI at login
 #
+# Run it again at any time to update; `ddm update` does the same from ddm itself.
+#
 # Works in Windows PowerShell 5.1 and PowerShell 7. Everything runs inside a
 # script block so nothing leaks into the session that ran `iex`, and errors
 # are thrown rather than calling `exit`, which would close that session.
@@ -82,15 +84,33 @@
         $dir = if ($env:DDM_INSTALL_DIR) { $env:DDM_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\ddm' }
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         $target = Join-Path $dir 'ddm.exe'
+        # Re-running this installer upgrades an existing install. Windows won't
+        # overwrite a running ddm.exe but lets it be renamed, so the old file is
+        # moved aside first (and the web UI, which runs from it, restarts below).
+        $previous = $null
+        if (Test-Path -LiteralPath $target) {
+            $previous = try { ((& $target --version 2>$null) -join ' ').Trim() } catch { $null }
+            Get-Process -Name ddm -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -eq $target } | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 300
+            Remove-Item -LiteralPath "$target.old" -Force -ErrorAction SilentlyContinue
+            try { Move-Item -LiteralPath $target -Destination "$target.old" -Force } catch { }
+        }
         try {
             Copy-Item -LiteralPath $exe -Destination $target -Force
         } catch {
+            if (Test-Path -LiteralPath "$target.old") { Move-Item -LiteralPath "$target.old" -Destination $target -Force -ErrorAction SilentlyContinue }
             throw "ddm install: could not write $target. If ddm is running, stop it and try again. ($_)"
         }
+        Remove-Item -LiteralPath "$target.old" -Force -ErrorAction SilentlyContinue
 
         $installed = try { (& $target --version 2>$null) -join ' ' } catch { 'ddm' }
         if (-not $installed) { $installed = 'ddm' }
-        Write-Host "Installed $installed to $target"
+        if ($previous -and $previous -ne $installed) {
+            Write-Host "Updated $previous -> $installed ($target)"
+        } else {
+            Write-Host "Installed $installed to $target"
+        }
 
         $onPath = ($env:Path -split ';' | ForEach-Object { $_.TrimEnd('\') }) -contains $dir.TrimEnd('\')
         if (-not $onPath) {

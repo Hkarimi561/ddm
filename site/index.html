@@ -193,6 +193,33 @@
   .note { font-size: 14px; color: var(--muted); margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
   .term pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 0; }
 
+  /* ---- pass-through section ---- */
+  .pt { display: grid; gap: 20px; }
+  .pt > * { min-width: 0; }
+  .term-tabs { display: flex; gap: 4px; margin-left: 10px; flex-wrap: wrap; }
+  .term-tabs button {
+    background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+    font: 12.5px var(--mono); color: var(--term-dim);
+  }
+  .term-tabs button[aria-selected="true"] { color: var(--term-text); border-color: #2a3530; background: #18211c; }
+  .term .pane[hidden] { display: none; }
+  .t-ddm { color: #c4b5fd; }
+  .legend-row { display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 18px 14px; font: 12px var(--mono); color: var(--term-dim); border-top: 1px solid #1d2622; }
+  .legend-row i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  .shell { display: grid; gap: 16px; }
+  @media (min-width: 760px) { .shell { grid-template-columns: 1.2fr 1fr; align-items: start; } }
+  .shell > * { min-width: 0; }
+  .snippets { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; }
+  .snippets h3 { margin: 0 0 6px; font-size: 16px; }
+  .snippets p { margin: 0 0 12px; color: var(--muted); font-size: 14.5px; }
+  .snippets dl { margin: 0; display: grid; gap: 8px; }
+  .snippets dt { font-size: 12.5px; color: var(--muted); }
+  .snippets dd { margin: 0; }
+  .snippets dd code {
+    display: block; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+
   @media (max-width: 560px) {
     nav.links a.hide-sm { display: none; }
     .hero { padding-top: 24px; }
@@ -209,6 +236,7 @@
     <nav class="links">
       <a class="hide-sm" href="#features">Features</a>
       <a class="hide-sm" href="#mirrors">Mirrors</a>
+      <a class="hide-sm" href="#passthrough">Pass-through</a>
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#usage">Usage</a>
       <a id="gh-link" href="#">GitHub</a>
@@ -220,7 +248,7 @@
       <div class="hero-text">
         <span class="pill"><span class="dot"></span><span id="version-pill">Docker download manager</span></span>
         <h1>Docker pulls that <em>survive</em> bad networks.</h1>
-        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped. If a mirror lets you down, it moves to the next one without losing a byte.</p>
+        <p class="lede">ddm downloads Docker images over parallel, resumable connections, checks every byte, and loads them into Docker under their original name. If the network drops, the laptop sleeps or you press Ctrl+C, run the command again and it continues from the exact byte where it stopped. If a mirror lets you down, it moves to the next one without losing a byte. And you can keep typing <code>docker</code>: ddm steps in only when a command needs something downloaded.</p>
 
         <div class="install" id="install">
           <div class="tabs" role="tablist">
@@ -333,6 +361,90 @@ Saved the new order for docker.io.</pre>
       </div>
     </section>
 
+    <section id="passthrough">
+      <h2>Keep typing <code>docker</code></h2>
+      <p class="sub">Put <code>ddm</code> in front of a docker command, or let a shell function do it for you. ddm downloads whatever images the command is missing, then runs the command unchanged: same terminal, same Ctrl+C, same exit code. Commands that need no downloads go straight to docker.</p>
+      <div class="pt">
+        <div class="term">
+          <div class="term-bar"><i></i><i></i><i></i>
+            <div class="term-tabs" role="tablist" aria-label="Examples">
+              <button role="tab" aria-selected="true" data-pane="pt-compose">compose up</button>
+              <button role="tab" aria-selected="false" data-pane="pt-run">run</button>
+              <button role="tab" aria-selected="false" data-pane="pt-doctor">doctor</button>
+            </div>
+          </div>
+<pre class="wrap pane" id="pt-compose"><span class="t-g">~/shop</span> <span class="t-dim">$</span> docker compose --profile web up -d
+<span class="t-ddm">Resolving postgres:16 (linux/amd64)
+Downloading 9 of 9 blobs (151.2 MiB)</span>
+<span class="t-ddm">total                         [<span class="t-g">██████████████████████</span>] 151.2 MiB / 151.2 MiB  done
+Loading postgres:16 into Docker
+Loaded image: postgres:16
+Resolving ghcr.io/shop/web:2 (linux/amd64)
+Downloading 4 of 6 blobs (38.0 MiB)</span>
+<span class="t-ddm">total                         [<span class="t-g">██████████████████████</span>] 38.0 MiB / 38.0 MiB    done
+Loading ghcr.io/shop/web:2 into Docker
+Loaded image: ghcr.io/shop/web:2</span>
+[+] Running 3/3
+ <span class="t-g">✔</span> Network shop_default   Created
+ <span class="t-g">✔</span> Container shop-db-1    Started
+ <span class="t-g">✔</span> Container shop-web-1   Started
+<span class="t-g">~/shop</span> <span class="t-dim">$</span> </pre>
+<pre class="wrap pane" id="pt-run" hidden><span class="t-g">~</span> <span class="t-dim">$</span> docker run --rm -it ubuntu:24.04 bash
+<span class="t-ddm">Resolving ubuntu:24.04 (linux/amd64)
+Downloading 2 of 2 blobs (28.4 MiB)
+layer 1/1 9c704ecd0c69   retries:2 [<span class="t-g">████████████</span><span class="t-dim">░░░░░░░░░░</span>] 15.9 MiB / 28.4 MiB  412.0 KiB/s  via docker.arvancloud.ir</span>
+<span class="t-dim">  ...the connection drops, ddm resumes, then:</span>
+<span class="t-ddm">Loading ubuntu:24.04 into Docker
+Loaded image: ubuntu:24.04</span>
+root@3f1c2a9b7e10:/# exit
+<span class="t-g">~</span> <span class="t-dim">$</span> docker ps --format '{{.Names}}'     <span class="t-dim"># needs no downloads: goes straight to docker</span>
+shop-web-1
+shop-db-1
+<span class="t-g">~</span> <span class="t-dim">$</span> </pre>
+<pre class="wrap pane" id="pt-doctor" hidden><span class="t-g">~</span> <span class="t-dim">$</span> ddm doctor
+
+  <span class="t-g">OK</span>    ddm                           v0.3.0 (linux/amd64)
+  <span class="t-g">OK</span>    config                        /home/sam/.config/ddm/config.yaml
+  <span class="t-g">OK</span>    cache                         /home/sam/.cache/ddm (2.1 GiB cached, 84.3 GiB free)
+  <span class="t-g">OK</span>    docker CLI                    /usr/bin/docker (version 28.3.0, context default)
+  <span class="t-r">FAIL</span>  docker engine                 not reachable: Cannot connect to the Docker daemon at unix:///var/run/docker.sock.
+                                      <span class="t-a">-&gt; Start the engine with `sudo systemctl start docker` (or start Docker Desktop), then try again.</span>
+  <span class="t-g">OK</span>    docker compose                v2.39.1
+  <span class="t-b">INFO</span>  docker model                  not installed: needed for Docker models (`docker model ...`).
+  <span class="t-b">INFO</span>  proxy                         none
+  <span class="t-g">OK</span>    https://docker.arvancloud.ir  reachable, 96ms
+  <span class="t-a">WARN</span>  docker.io (upstream)          unreachable: HTTP 403 Forbidden
+                                      <span class="t-a">-&gt; Other endpoints work, so pulls can still succeed.</span>
+</pre>
+          <div class="legend-row"><span><i style="background:#c4b5fd"></i>ddm (on stderr)</span><span><i style="background:var(--term-text)"></i>docker's own output</span></div>
+        </div>
+
+        <div class="shell">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Command</th><th>What ddm does first</th></tr></thead>
+              <tbody>
+                <tr><td><code>run</code>, <code>create</code></td><td>Downloads the image if Docker lacks it, honoring <code>--platform</code></td></tr>
+                <tr><td><code>pull</code></td><td>Does the pull itself</td></tr>
+                <tr><td><code>compose up</code>, <code>run</code></td><td>Downloads missing images of the services that will start, including <code>depends_on</code>; honors <code>-f</code>, <code>--profile</code> and <code>.env</code></td></tr>
+                <tr><td><code>compose pull</code></td><td>Pulls every service image itself</td></tr>
+                <tr><td>anything else</td><td>Nothing: straight to docker</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="snippets">
+            <h3>Make plain <code>docker</code> use ddm</h3>
+            <p>One line in your shell's startup file. Skip it once with <code>command docker</code>, or turn it off with <code>DDM_PASSTHROUGH=off</code>.</p>
+            <dl>
+              <dt>bash / zsh</dt><dd><code>eval "$(ddm shell-init bash)"</code></dd>
+              <dt>fish</dt><dd><code>ddm shell-init fish | source</code></dd>
+              <dt>PowerShell ($PROFILE)</dt><dd><code>ddm shell-init powershell | Out-String | Invoke-Expression</code></dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="how">
       <h2>How it works</h2>
       <p class="sub">ddm skips Docker's downloader and only hands Docker the finished result. No network is involved in that last step.</p>
@@ -364,6 +476,9 @@ Saved the new order for docker.io.</pre>
             <tr><td><code>ddm mirror list</code></td><td>Show mirrors in the order they are tried</td></tr>
             <tr><td><code>ddm config set proxy socks5://127.0.0.1:1080</code></td><td>Send registry traffic through a proxy (http, https or socks5)</td></tr>
             <tr><td><code>ddm config list</code></td><td>Show every setting and where the config file lives</td></tr>
+            <tr><td><code>ddm docker compose up -d</code></td><td>Download the project's missing images, then run compose</td></tr>
+            <tr><td><code>ddm doctor</code></td><td>Check Docker, the cache, the config and every registry endpoint</td></tr>
+            <tr><td><code>ddm shell-init bash</code></td><td>Print a <code>docker</code> function that goes through ddm</td></tr>
           </tbody>
         </table>
       </div>
@@ -375,7 +490,7 @@ Saved the new order for docker.io.</pre>
       <div class="roadmap">
         <div class="done"><b>Resumable engine</b><code>ddm pull</code> and the Docker import</div>
         <div class="done"><b>Mirrors &amp; config</b>Mirror fallback, <code>ddm mirror test</code>, proxies, config file <em>(in testing)</em></div>
-        <div><b>Pass-through</b><code>ddm docker run …</code> fetches what a command needs, then runs it</div>
+        <div class="done"><b>Pass-through &amp; doctor</b><code>ddm docker …</code>, <code>ddm doctor</code>, <code>ddm shell-init</code> <em>(in testing)</em></div>
         <div><b>Docker models</b><code>ddm model pull</code> for Docker Model Runner</div>
         <div><b>Polish</b>Pause/resume, bandwidth limits, cache cleanup</div>
       </div>
@@ -597,6 +712,16 @@ Saved the new order for docker.io.</pre>
       handOver();
     }
   }
+  // ---- pass-through example tabs ---------------------------------------------
+  const ptTabs = document.querySelectorAll("#passthrough .term-tabs button");
+  ptTabs.forEach(btn => btn.addEventListener("click", () => {
+    ptTabs.forEach(b => {
+      const on = b === btn;
+      b.setAttribute("aria-selected", String(on));
+      document.getElementById(b.dataset.pane).hidden = !on;
+    });
+  }));
+
   // Start when the section scrolls into view, so the hand-over is seen from the beginning.
   const chainEl = document.getElementById("chain");
   if ("IntersectionObserver" in window) {

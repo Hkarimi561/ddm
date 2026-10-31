@@ -37,7 +37,7 @@ leaves PATH alone. Prebuilt archives are also on the Releases page.
 
 ## Build from source
 
-You need Go 1.23 or newer. Docker is only needed at runtime.
+You need Go 1.25 or newer. Docker is only needed at runtime.
 
 ```sh
 go mod tidy          # resolves dependencies and writes go.sum

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -26,6 +27,8 @@ type Config struct {
 	Retries      int // 0 = retry forever
 	StallTimeout time.Duration
 	MinSpeed     int64 // bytes/s; a mirror slower than this is switched away from (0 = never)
+	RateLimit    int64 // bytes/s for all downloads of a process together (0 = unlimited)
+	UIAddress    string
 	Proxy        string
 	NoProxy      string
 	CacheDir     string
@@ -41,6 +44,7 @@ func Defaults() Config {
 		Parallel:     3,
 		StallTimeout: 30 * time.Second,
 		MinSpeed:     32 << 10,
+		UIAddress:    "127.0.0.1:7878",
 		Mirrors:      map[string][]string{},
 	}
 }
@@ -82,6 +86,26 @@ var Keys = []Key{
 				return err
 			}
 			c.MinSpeed = n
+			return nil
+		}},
+	{"bandwidth_limit", "cap the total download speed, e.g. 2MiB (0 = unlimited)",
+		func(c *Config) string { return FormatSize(c.RateLimit) },
+		func(c *Config, v string) error {
+			n, err := ParseSize(v)
+			if err != nil {
+				return err
+			}
+			c.RateLimit = n
+			return nil
+		}},
+	{"ui_address", "where the web UI listens; 0.0.0.0:7878 opens it to your network (restart it after a change)",
+		func(c *Config) string { return c.UIAddress },
+		func(c *Config, v string) error {
+			host, port, err := net.SplitHostPort(strings.TrimSpace(v))
+			if p, perr := strconv.Atoi(port); err != nil || perr != nil || p < 1 || p > 65535 {
+				return fmt.Errorf("want host:port, like 127.0.0.1:7878")
+			}
+			c.UIAddress = net.JoinHostPort(host, port)
 			return nil
 		}},
 	{"proxy", "proxy for all registry traffic: http://, https:// or socks5:// (default: HTTP(S)_PROXY)",
@@ -212,6 +236,16 @@ func Load(path string) (*File, error) {
 		}
 	}
 	return f, nil
+}
+
+// DefaultValue returns a setting's built-in default.
+func DefaultValue(name string) (string, error) {
+	k, err := lookupKey(name)
+	if err != nil {
+		return "", err
+	}
+	d := Defaults()
+	return k.get(&d), nil
 }
 
 // Get returns the effective value of a setting.

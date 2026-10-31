@@ -43,6 +43,10 @@ type Options struct {
 	SwitchAfter int           // consecutive failures before trying the next source
 	MinSpeed    int64         // bytes/s; below this over SlowWindow, try the next source (0 = never)
 	SlowWindow  time.Duration // how long a source gets before its speed is judged
+
+	// Shared across all downloads of a process.
+	Limiter *Limiter // bandwidth cap; nil = unlimited
+	Gate    *Gate    // pause/resume; nil = never paused
 }
 
 // DefaultOptions returns the default tuning.

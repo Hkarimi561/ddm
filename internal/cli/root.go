@@ -8,13 +8,16 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Hkarimi561/ddm/internal/cache"
 	"github.com/Hkarimi561/ddm/internal/config"
+	"github.com/Hkarimi561/ddm/internal/engine"
 	"github.com/Hkarimi561/ddm/internal/registry"
+	"github.com/Hkarimi561/ddm/internal/runstate"
 )
 
 // Version is reported by `ddm --version`.
@@ -24,8 +27,14 @@ type globals struct {
 	verbose    bool
 	cacheDir   string
 	configPath string
+	limitRate  string
 
 	cfg *config.File
+
+	// Shared by every download of this process; see control.
+	limiter *engine.Limiter
+	gate    *engine.Gate
+	run     *runstate.Run
 }
 
 // Execute runs ddm and returns the process exit code.
@@ -39,7 +48,9 @@ func Execute() int {
 		stop()
 	}()
 
-	err := newRootCmd().ExecuteContext(ctx)
+	root, g := newRootCmd()
+	err := root.ExecuteContext(ctx)
+	g.close()
 	var exit *exitError
 	switch {
 	case err == nil:
@@ -55,7 +66,7 @@ func Execute() int {
 	}
 }
 
-func newRootCmd() *cobra.Command {
+func newRootCmd() (*cobra.Command, *globals) {
 	g := &globals{}
 	root := &cobra.Command{
 		Use:   "ddm",
@@ -72,9 +83,62 @@ they stopped, even after a reboot.`,
 	pf.BoolVar(&g.verbose, "verbose", false, "print debug logs")
 	pf.StringVar(&g.cacheDir, "cache-dir", "", "blob cache directory (default: $DDM_CACHE_DIR, cache_dir from the config, or the OS cache directory)")
 	pf.StringVar(&g.configPath, "config", "", "config file (default: $DDM_CONFIG or the OS config directory)")
+	pf.StringVar(&g.limitRate, "limit-rate", "", "cap the total download speed, e.g. 2MiB (default: bandwidth_limit from the config)")
 
-	root.AddCommand(newPullCmd(g), newModelCmd(g), newDockerCmd(g), newDoctorCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g))
-	return root
+	root.AddCommand(
+		newPullCmd(g), newModelCmd(g), newDockerCmd(g),
+		newStatusCmd(g), newPauseCmd(g), newResumeCmd(g), newLimitCmd(g),
+		newCacheCmd(g), newServiceCmd(g), newServeCmd(g), newDoctorCmd(g), newShellInitCmd(), newConfigCmd(g), newMirrorCmd(g),
+	)
+	return root, g
+}
+
+// control returns the bandwidth limiter and pause gate shared by all of
+// this process's downloads. The first call registers the process, so `ddm
+// status`, `ddm pause`, `ddm resume` and `ddm limit` can see and steer it.
+func (g *globals) control(configured int64) (*engine.Limiter, *engine.Gate, error) {
+	if g.gate != nil {
+		return g.limiter, g.gate, nil
+	}
+	rate := configured
+	if g.limitRate != "" {
+		var err error
+		if rate, err = config.ParseSize(g.limitRate); err != nil {
+			return nil, nil, fmt.Errorf("--limit-rate: %w", err)
+		}
+	}
+	g.limiter, g.gate = engine.NewLimiter(rate), engine.NewGate()
+	if c, err := g.cache(); err == nil {
+		if dir, err := runstate.Open(c.Root); err == nil {
+			g.run, err = dir.Start(commandLine(), g.gate, g.limiter, func(paused bool) {
+				if paused {
+					fmt.Fprintln(os.Stderr, "\nddm: paused; run `ddm resume` to continue.")
+				} else {
+					fmt.Fprintln(os.Stderr, "\nddm: resumed.")
+				}
+			})
+			if err != nil {
+				g.logger().Debug("could not register for ddm status", "err", err)
+			}
+		}
+	}
+	return g.limiter, g.gate, nil
+}
+
+// close unregisters the process from the run directory.
+func (g *globals) close() {
+	if g.run != nil {
+		g.run.Close()
+		g.run = nil
+	}
+}
+
+func commandLine() string {
+	s := "ddm " + strings.Join(os.Args[1:], " ")
+	if len(s) > 80 {
+		s = s[:79] + "…"
+	}
+	return s
 }
 
 func (g *globals) logger() *slog.Logger {

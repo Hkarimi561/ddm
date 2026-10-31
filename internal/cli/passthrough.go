@@ -54,6 +54,7 @@ func passThrough(ctx context.Context, g *globals, args []string) error {
 			return nil
 		}
 	}
+	g.close() // on Unix, Exec replaces this process: unregister first
 	code, err := docker.Exec(cli.Bin, args)
 	if err != nil {
 		return err

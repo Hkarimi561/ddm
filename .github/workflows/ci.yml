@@ -111,7 +111,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          export DDM_BASE_URL="file://$PWD/dist" DDM_INSTALL_DIR="$RUNNER_TEMP/bin"
+          export DDM_BASE_URL="file://$PWD/dist" DDM_INSTALL_DIR="$RUNNER_TEMP/bin" DDM_NO_SERVICE=1
           bash < scripts/install.sh
           "$DDM_INSTALL_DIR/ddm" --version
           "$DDM_INSTALL_DIR/ddm" pull --help > /dev/null
@@ -122,6 +122,7 @@ jobs:
           $env:DDM_BASE_URL = Join-Path $PWD 'dist'
           $env:DDM_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'ddm'
           $env:DDM_NO_MODIFY_PATH = '1'
+          $env:DDM_NO_SERVICE = '1'
           powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Raw scripts/install.ps1 | Invoke-Expression"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & (Join-Path $env:DDM_INSTALL_DIR 'ddm.exe') --version

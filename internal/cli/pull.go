@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,7 +19,7 @@ import (
 
 func newPullCmd(g *globals) *cobra.Command {
 	opts := pull.Options{Engine: engine.DefaultOptions()}
-	var minSpeed string
+	var minSpeed, startAt string
 	cmd := &cobra.Command{
 		Use:   "pull IMAGE",
 		Short: "Download an image with resumable transfers and load it into Docker",
@@ -51,6 +53,7 @@ func newPullCmd(g *globals) *cobra.Command {
 					return fmt.Errorf("--min-speed: %w", err)
 				}
 			}
+			opts.Engine.Limiter, opts.Engine.Gate = conf.Engine.Limiter, conf.Engine.Gate
 			p.Registry.MaxRetries = opts.Engine.MaxRetries
 
 			if !opts.NoLoad {
@@ -61,6 +64,9 @@ func newPullCmd(g *globals) *cobra.Command {
 					return fmt.Errorf("%w\n(use --no-load to only download into the ddm cache)", err)
 				}
 				p.Docker = d
+			}
+			if err := waitUntil(cmd.Context(), startAt); err != nil {
+				return err
 			}
 			return p.Pull(cmd.Context(), args[0], opts)
 		},
@@ -74,6 +80,7 @@ func newPullCmd(g *globals) *cobra.Command {
 	f.DurationVar(&opts.Engine.StallTimeout, "stall-timeout", opts.Engine.StallTimeout, "reconnect when no data arrives for this long")
 	f.BoolVar(&opts.NoLoad, "no-load", false, "only download into the ddm cache; don't load into Docker")
 	f.StringVar(&minSpeed, "min-speed", "", "switch to the next mirror below this speed, e.g. 64KiB (0 = never; default from config)")
+	f.StringVar(&startAt, "start-at", "", "wait until this time before downloading, e.g. 02:00 (for cheap night-time bandwidth)")
 	return cmd
 }
 
@@ -90,6 +97,9 @@ func (g *globals) puller(out io.Writer, log *slog.Logger) (*pull.Puller, pull.Op
 	opts.Engine.MaxRetries = conf.Retries
 	opts.Engine.StallTimeout = conf.StallTimeout
 	opts.Engine.MinSpeed = conf.MinSpeed
+	if opts.Engine.Limiter, opts.Engine.Gate, err = g.control(conf.RateLimit); err != nil {
+		return nil, opts, err
+	}
 
 	c, err := g.cache()
 	if err != nil {
@@ -105,8 +115,45 @@ func (g *globals) puller(out io.Writer, log *slog.Logger) (*pull.Puller, pull.Op
 		Out:      out,
 		Log:      log,
 		NewReporter: func(total int64) pull.Reporter {
-			return ui.NewReporter(os.Stderr, total, g.verbose)
+			rep := ui.NewReporter(os.Stderr, total, g.verbose)
+			if g.run != nil {
+				return g.run.Tee(rep) // also feeds `ddm status`
+			}
+			return rep
 		},
 	}
 	return p, opts, nil
+}
+
+// waitUntil sleeps until the local time given as "HH:MM" (today, or
+// tomorrow if that has passed), or until an RFC 3339 timestamp.
+func waitUntil(ctx context.Context, at string) error {
+	if at == "" {
+		return nil
+	}
+	now := time.Now()
+	var when time.Time
+	if t, err := time.ParseInLocation("15:04", at, time.Local); err == nil {
+		when = time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.Local)
+		if !when.After(now) {
+			when = when.Add(24 * time.Hour)
+		}
+	} else if t, err := time.Parse(time.RFC3339, at); err == nil {
+		when = t
+	} else {
+		return fmt.Errorf("--start-at: want a time like 02:00 or 2026-11-01T02:00:00+03:30")
+	}
+	if !when.After(now) {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Waiting until %s to start (%s from now). Ctrl+C to cancel.\n",
+		when.Format("Mon 15:04"), when.Sub(now).Round(time.Minute))
+	t := time.NewTimer(when.Sub(now))
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }

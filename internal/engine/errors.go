@@ -17,6 +17,7 @@ var (
 	errAgain            = errors.New("download state changed")
 	errStalled          = errors.New("connection stalled")
 	errSwitched         = errors.New("switched to another source")
+	errPaused           = errors.New("paused")
 )
 
 // permanentError marks failures that retrying the same request cannot fix.

@@ -76,6 +76,8 @@ func (g *globals) modelPuller(ctx context.Context, out io.Writer, load bool, cli
 		Hub:    hf.NewHub(cfg.Config.Mirrors, p.Registry.Transport),
 		Out:    out,
 		Log:    log,
+
+		HFImport: cfg.Config.HFImport,
 	}
 	if !load {
 		return mp, nil

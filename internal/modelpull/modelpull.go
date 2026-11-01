@@ -41,6 +41,10 @@ type Puller struct {
 	Hub    *hf.Hub
 	Runner *modelrunner.Client // nil: download into the cache only
 	Docker *docker.CLI         // runs `docker model package` for Hugging Face models
+	// HFImport is "auto", "on" or "off". Importing means downloading a Hugging
+	// Face model with ddm and loading the files into the runner; otherwise the
+	// runner downloads it itself with `docker model pull`.
+	HFImport string
 	Out    io.Writer
 	Log    *slog.Logger
 }
@@ -162,6 +166,9 @@ func (p *Puller) pullHF(ctx context.Context, ref modelref.Ref) error {
 			fmt.Fprintf(p.Out, "%s is already in Docker Model Runner.\n", ref)
 			return nil
 		}
+	}
+	if p.Runner != nil && p.Docker != nil && !p.importWanted() {
+		return p.dockerPull(ctx, ref)
 	}
 	warnMemory(p.Out, plan.WeightBytes())
 	digests, err := p.downloadHF(ctx, ref, plan)
@@ -303,14 +310,61 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if strings.Contains(tail, "missing blob") && p.HFImport != "on" {
+			// This runner can't take files from outside (a runner bug, seen in
+			// v1.2.9). Remember that, and let it download the model itself.
+			p.markImportBroken()
+			fmt.Fprintf(p.Out, "Docker Model Runner would not import the downloaded files; letting it download %s itself.\n"+
+				"(Later pulls skip ddm's download. `ddm config set hf_import on` turns it back on.)\n", ref)
+			return p.dockerPull(ctx, ref)
+		}
 		return packageError(tail)
 	}
+	p.clearImportBroken()
 	if target != ref.String() {
 		if err := p.Runner.Tag(ctx, lower, ref.Name, ref.Tag); err != nil {
 			return fmt.Errorf("the model was loaded as %s, but could not also be named %s: %w", lower, ref, err)
 		}
 	}
 	fmt.Fprintf(p.Out, "Loaded model %s\n", ref)
+	return nil
+}
+
+func (p *Puller) importMarker() string {
+	return filepath.Join(p.Images.Cache.Root, "hf-import-broken")
+}
+
+// importWanted reports whether to download a Hugging Face model with ddm and
+// import it, instead of having the runner download it.
+func (p *Puller) importWanted() bool {
+	switch p.HFImport {
+	case "off":
+		return false
+	case "on":
+		return true
+	}
+	_, err := os.Stat(p.importMarker())
+	return err != nil
+}
+
+func (p *Puller) markImportBroken() {
+	_ = os.WriteFile(p.importMarker(), []byte("docker model package failed with a missing blob\n"), 0o644)
+}
+
+func (p *Puller) clearImportBroken() { _ = os.Remove(p.importMarker()) }
+
+// dockerPull lets Docker Model Runner download the model itself.
+func (p *Puller) dockerPull(ctx context.Context, ref modelref.Ref) error {
+	name := "hf.co/" + ref.Repo
+	if ref.Tag != "" {
+		name += ":" + ref.Tag
+	}
+	if _, err := p.Docker.Stream(ctx, p.Out, "model", "pull", name); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("docker model pull %s failed: %w", name, err)
+	}
 	return nil
 }
 

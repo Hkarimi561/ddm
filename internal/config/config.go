@@ -29,7 +29,8 @@ type Config struct {
 	MinSpeed     int64 // bytes/s; a mirror slower than this is switched away from (0 = never)
 	RateLimit    int64 // bytes/s for all downloads of a process together (0 = unlimited)
 	UIAddress    string
-	UICommands   bool // allow pulling and running docker commands from the web UI
+	UICommands   bool   // allow pulling and running docker commands from the web UI
+	HFImport     string // "auto", "on" or "off": load Hugging Face models into Model Runner from ddm's own download
 	Proxy        string
 	NoProxy      string
 	CacheDir     string
@@ -47,6 +48,7 @@ func Defaults() Config {
 		MinSpeed:     32 << 10,
 		UIAddress:    "127.0.0.1:7878",
 		UICommands:   true,
+		HFImport:     "auto",
 		Mirrors:      map[string][]string{},
 	}
 }
@@ -118,6 +120,16 @@ var Keys = []Key{
 				return fmt.Errorf("want true or false")
 			}
 			c.UICommands = b
+			return nil
+		}},
+	{"hf_import", "Hugging Face models: on = download with ddm and import into Model Runner, off = let docker download them, auto = on until an import fails",
+		func(c *Config) string { return c.HFImport },
+		func(c *Config, v string) error {
+			v = strings.ToLower(strings.TrimSpace(v))
+			if v != "auto" && v != "on" && v != "off" {
+				return fmt.Errorf("want auto, on or off")
+			}
+			c.HFImport = v
 			return nil
 		}},
 	{"proxy", "proxy for all registry traffic: http://, https:// or socks5:// (default: HTTP(S)_PROXY)",

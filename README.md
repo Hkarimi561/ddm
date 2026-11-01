@@ -122,6 +122,11 @@ ddm docker model run ai/gemma3 "Hello"      # pass-through: fetch if missing, th
     `docker model run` looks for.
   - Mirrors: `ddm mirror add hf.co https://hf-mirror.com`. `HF_ENDPOINT`
     and, for gated repos, `HF_TOKEN` are honored.
+  - Some Model Runner versions refuse files imported this way (`missing
+    blob` errors, also with plain `docker model package`). Then ddm lets
+    Docker download the model itself and remembers to do that next time.
+    Force either way with `ddm config set hf_import on` or `off`; the default
+    is `auto`.
 - **Before downloading**, ddm checks that the `docker model` plugin is
   installed and that the runner is running. If the runner is off, it offers
   to start it, and only after you say yes. ddm warns, without blocking, when

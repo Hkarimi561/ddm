@@ -275,21 +275,18 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 		}
 	}
 
-	build := func(withMMProj bool) []string {
-		args := []string{"model", "package"}
-		switch plan.Format {
-		case hf.GGUF:
-			args = append(args, "--gguf", local(plan.Weights[0]))
-			if withMMProj && plan.MMProj != nil {
-				args = append(args, "--mmproj", local(*plan.MMProj))
-			}
-			if plan.ChatTemplate != nil {
-				args = append(args, "--chat-template", local(*plan.ChatTemplate))
-			}
-		case hf.Safetensors:
-			args = append(args, "--safetensors-dir", dir)
+	args := []string{"model", "package"}
+	switch plan.Format {
+	case hf.GGUF:
+		args = append(args, "--gguf", local(plan.Weights[0]))
+		if plan.MMProj != nil {
+			args = append(args, "--mmproj", local(*plan.MMProj))
 		}
-		return args
+		if plan.ChatTemplate != nil {
+			args = append(args, "--chat-template", local(*plan.ChatTemplate))
+		}
+	case hf.Safetensors:
+		args = append(args, "--safetensors-dir", dir)
 	}
 
 	fmt.Fprintf(p.Out, "Packaging %s for Docker Model Runner\n", ref)
@@ -301,13 +298,7 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 	if lower != target {
 		target = lower
 	}
-	tail, err := p.Docker.Stream(ctx, p.Out, append(build(true), target)...)
-	if err != nil && ctx.Err() == nil && plan.MMProj != nil && strings.Contains(tail, "missing blob") {
-		// The multimodal projector is optional (text-only use doesn't need it),
-		// so try once more without it.
-		fmt.Fprintln(p.Out, "Retrying without the multimodal projector")
-		tail, err = p.Docker.Stream(ctx, p.Out, append(build(false), target)...)
-	}
+	tail, err := p.Docker.Stream(ctx, p.Out, append(args, target)...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -327,8 +318,8 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 func packageError(tail string) error {
 	err := fmt.Errorf("docker model package failed: %s", lastLine(tail))
 	if strings.Contains(tail, "missing blob") {
-		return fmt.Errorf("%w\nDocker Model Runner refused the files ddm downloaded (they are verified and kept, so a retry won't download them again). "+
-			"Restart Docker Desktop and run the command again; if `docker model df` also fails, the runner's own store is damaged", err)
+		return fmt.Errorf("%w\nDocker Model Runner would not import the files ddm downloaded (they are verified and kept in the ddm cache). "+
+			"Docker can still fetch the model itself with `docker model pull`; if that fails too, restart Docker Desktop", err)
 	}
 	return err
 }

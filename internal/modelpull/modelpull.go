@@ -275,18 +275,21 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 		}
 	}
 
-	args := []string{"model", "package"}
-	switch plan.Format {
-	case hf.GGUF:
-		args = append(args, "--gguf", local(plan.Weights[0]))
-		if plan.MMProj != nil {
-			args = append(args, "--mmproj", local(*plan.MMProj))
+	build := func(withMMProj bool) []string {
+		args := []string{"model", "package"}
+		switch plan.Format {
+		case hf.GGUF:
+			args = append(args, "--gguf", local(plan.Weights[0]))
+			if withMMProj && plan.MMProj != nil {
+				args = append(args, "--mmproj", local(*plan.MMProj))
+			}
+			if plan.ChatTemplate != nil {
+				args = append(args, "--chat-template", local(*plan.ChatTemplate))
+			}
+		case hf.Safetensors:
+			args = append(args, "--safetensors-dir", dir)
 		}
-		if plan.ChatTemplate != nil {
-			args = append(args, "--chat-template", local(*plan.ChatTemplate))
-		}
-	case hf.Safetensors:
-		args = append(args, "--safetensors-dir", dir)
+		return args
 	}
 
 	fmt.Fprintf(p.Out, "Packaging %s for Docker Model Runner\n", ref)
@@ -294,25 +297,27 @@ func (p *Puller) packageHF(ctx context.Context, ref modelref.Ref, plan *hf.Plan,
 	// names keep their case. Package under the lowercase name, then add the
 	// exact name through the runner's API.
 	lower := strings.ToLower(ref.Name) + ":" + ref.Tag
-	if lower != ref.String() {
-		if tail, err := p.Docker.Stream(ctx, p.Out, append(args, lower)...); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return packageError(tail)
-		}
-		if err := p.Runner.Tag(ctx, lower, ref.Name, ref.Tag); err != nil {
-			return fmt.Errorf("the model was loaded as %s, but could not also be named %s: %w", lower, ref, err)
-		}
-		fmt.Fprintf(p.Out, "Loaded model %s\n", ref)
-		return nil
+	target := ref.String()
+	if lower != target {
+		target = lower
 	}
-	tail, err := p.Docker.Stream(ctx, p.Out, append(args, ref.String())...)
+	tail, err := p.Docker.Stream(ctx, p.Out, append(build(true), target)...)
+	if err != nil && ctx.Err() == nil && plan.MMProj != nil && strings.Contains(tail, "missing blob") {
+		// The multimodal projector is optional (text-only use doesn't need it),
+		// so try once more without it.
+		fmt.Fprintln(p.Out, "Retrying without the multimodal projector")
+		tail, err = p.Docker.Stream(ctx, p.Out, append(build(false), target)...)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return packageError(tail)
+	}
+	if target != ref.String() {
+		if err := p.Runner.Tag(ctx, lower, ref.Name, ref.Tag); err != nil {
+			return fmt.Errorf("the model was loaded as %s, but could not also be named %s: %w", lower, ref, err)
+		}
 	}
 	fmt.Fprintf(p.Out, "Loaded model %s\n", ref)
 	return nil
